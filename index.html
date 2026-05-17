@@ -1,0 +1,1632 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCF Otimização</title>
+<meta name="theme-color" content="#007AFF">
+<style>
+  :root {
+    --color-white: #FFFFFF;
+    --color-background: #F5F5F7;
+    --color-text-primary: #1D1D1F;
+    --color-text-secondary: #86868B;
+    --color-text-tertiary: #B0B0B5;
+    --color-blue: #007AFF;
+    --color-blue-dark: #0051D5;
+    --color-blue-light: rgba(0, 122, 255, 0.08);
+    --color-green: #34C759;
+    --color-green-light: rgba(52, 199, 89, 0.12);
+    --color-orange: #FF9500;
+    --color-orange-light: rgba(255, 149, 0, 0.12);
+    --color-red: #FF3B30;
+    --color-red-light: rgba(255, 59, 48, 0.12);
+    --color-border: #D2D2D7;
+    --color-border-soft: #E5E5EA;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: var(--font);
+    color: var(--color-text-primary);
+    background: var(--color-background);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ===== Header ===== */
+  .app-header {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--color-border);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header-content {
+    max-width: 1400px; margin: 0 auto;
+    padding: 16px 32px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .app-title {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 1.25rem; font-weight: 600;
+  }
+  .app-title .logo {
+    width: 32px; height: 32px;
+    background: var(--color-blue);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 0.85rem;
+  }
+  .header-meta {
+    display: flex; align-items: center; gap: 16px;
+    color: var(--color-text-secondary); font-size: 0.875rem;
+  }
+  .user-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; background: var(--color-background);
+    border-radius: 999px; font-weight: 500;
+  }
+  .user-pill .avatar {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: linear-gradient(135deg, #007AFF, #34C759);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 0.7rem; font-weight: 700;
+  }
+
+  /* ===== Tabs ===== */
+  .tab-nav {
+    max-width: 1400px; margin: 0 auto;
+    padding: 16px 32px 0;
+    display: flex; gap: 4px; overflow-x: auto;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+  .tab-btn {
+    padding: 10px 16px;
+    background: transparent; border: none;
+    color: var(--color-text-secondary);
+    font-family: inherit; font-size: 0.9rem; font-weight: 500;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--color-text-primary); background: var(--color-blue-light); }
+  .tab-btn.active {
+    color: var(--color-blue);
+    border-bottom-color: var(--color-blue);
+  }
+
+  /* ===== Layout ===== */
+  main {
+    max-width: 1400px; margin: 0 auto;
+    padding: 32px;
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .section-title {
+    font-size: 1.5rem; font-weight: 600; margin-bottom: 8px;
+  }
+  .section-subtitle {
+    color: var(--color-text-secondary); margin-bottom: 24px;
+  }
+
+  /* ===== Hero ===== */
+  .hero {
+    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    color: white;
+    padding: 40px 48px;
+    border-radius: var(--radius-xl);
+    margin-bottom: 32px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 32px;
+    align-items: center;
+    box-shadow: var(--shadow-lg);
+  }
+  .hero-left h2 {
+    font-size: 0.875rem; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    opacity: 0.85; margin-bottom: 8px;
+  }
+  .hero-left .big-number {
+    font-size: 3.5rem; font-weight: 700; line-height: 1;
+    margin-bottom: 12px;
+  }
+  .hero-left .subtitle {
+    font-size: 1.0625rem; opacity: 0.9;
+  }
+  .hero-right {
+    text-align: right;
+    border-left: 1px solid rgba(255,255,255,0.3);
+    padding-left: 32px;
+  }
+  .hero-right .row {
+    display: flex; justify-content: space-between;
+    gap: 32px;
+    padding: 8px 0;
+  }
+  .hero-right .label { opacity: 0.85; font-size: 0.875rem; }
+  .hero-right .value { font-weight: 600; font-size: 1.125rem; }
+
+  /* ===== KPI cards ===== */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .kpi-card {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border-soft);
+  }
+  .kpi-card .kpi-label {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .kpi-card .kpi-value {
+    font-size: 1.875rem; font-weight: 700; line-height: 1;
+    margin-bottom: 8px;
+  }
+  .kpi-card .kpi-delta {
+    font-size: 0.8125rem; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .kpi-delta.up { color: var(--color-green); }
+  .kpi-delta.down { color: var(--color-red); }
+  .kpi-delta.flat { color: var(--color-text-secondary); }
+
+  /* ===== Card panel ===== */
+  .panel {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border-soft);
+  }
+  .panel-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 16px;
+  }
+  .panel-title {
+    font-size: 1.0625rem; font-weight: 600;
+  }
+  .panel-subtitle {
+    font-size: 0.8125rem; color: var(--color-text-secondary);
+  }
+  .panel-actions {
+    display: flex; gap: 8px;
+  }
+
+  /* ===== Buttons / Pills ===== */
+  .btn {
+    padding: 8px 14px;
+    border-radius: 8px; border: none;
+    font-family: inherit; font-size: 0.875rem; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--color-blue); color: white; }
+  .btn-primary:hover { background: var(--color-blue-dark); }
+  .btn-ghost { background: var(--color-background); color: var(--color-text-primary); }
+  .btn-ghost:hover { background: var(--color-border-soft); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .pill-green { background: var(--color-green-light); color: var(--color-green); }
+  .pill-orange { background: var(--color-orange-light); color: var(--color-orange); }
+  .pill-red { background: var(--color-red-light); color: var(--color-red); }
+  .pill-blue { background: var(--color-blue-light); color: var(--color-blue); }
+  .pill-grey { background: var(--color-background); color: var(--color-text-secondary); }
+
+  /* ===== Top alavancas list ===== */
+  .lever-list { display: flex; flex-direction: column; gap: 8px; }
+  .lever-row {
+    display: grid;
+    grid-template-columns: 32px 1fr auto auto auto;
+    gap: 16px;
+    padding: 14px 16px;
+    background: var(--color-background);
+    border-radius: var(--radius-sm);
+    align-items: center;
+    transition: background 0.15s;
+  }
+  .lever-row:hover { background: var(--color-blue-light); cursor: pointer; }
+  .lever-rank {
+    font-weight: 700; font-size: 1.0625rem;
+    color: var(--color-blue);
+    text-align: center;
+  }
+  .lever-title { font-weight: 500; }
+  .lever-detail { font-size: 0.8125rem; color: var(--color-text-secondary); margin-top: 2px; }
+  .lever-impact {
+    font-weight: 600;
+    color: var(--color-green);
+    text-align: right;
+    min-width: 60px;
+  }
+  .lever-euros {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    text-align: right;
+    min-width: 110px;
+  }
+
+  /* ===== Table ===== */
+  .table-wrap { overflow-x: auto; }
+  table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  table.data th {
+    text-align: left;
+    padding: 12px 16px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--color-border-soft);
+    background: var(--color-background);
+  }
+  table.data th.num, table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+  table.data tr:hover td { background: var(--color-blue-light); }
+  table.data tr.summary td {
+    background: var(--color-background);
+    font-weight: 600;
+    border-top: 2px solid var(--color-border);
+  }
+  .delta-positive { color: var(--color-green); font-weight: 600; }
+  .delta-negative { color: var(--color-red); font-weight: 600; }
+
+  /* ===== Chart (CSS bar chart) ===== */
+  .barchart {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+    align-items: end;
+    height: 220px;
+    padding: 16px 8px 0;
+  }
+  .bar-group {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    height: 100%;
+    justify-content: end;
+  }
+  .bar-pair {
+    display: flex; align-items: end; gap: 3px; height: 180px;
+  }
+  .bar {
+    width: 14px;
+    border-radius: 4px 4px 0 0;
+    transition: opacity 0.15s;
+  }
+  .bar.real { background: var(--color-blue); }
+  .bar.sugg { background: var(--color-green); opacity: 0.7; }
+  .bar:hover { opacity: 1; }
+  .bar-label { font-size: 0.6875rem; color: var(--color-text-secondary); }
+  .chart-legend {
+    display: flex; gap: 16px; margin-top: 16px;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    justify-content: center;
+  }
+  .chart-legend .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* ===== Filters ===== */
+  .filter-bar {
+    display: flex; gap: 8px; margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .filter-bar select, .filter-bar input {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-white);
+    font-family: inherit; font-size: 0.875rem;
+    color: var(--color-text-primary);
+    cursor: pointer;
+  }
+
+  /* ===== Two-col layout ===== */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 24px;
+  }
+
+  /* ===== Simulador sliders ===== */
+  .slider-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 80px;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+  .slider-row:last-child { border-bottom: none; }
+  .slider-label { font-weight: 500; font-size: 0.9rem; }
+  .slider-row input[type=range] {
+    width: 100%; accent-color: var(--color-blue);
+  }
+  .slider-value {
+    text-align: right; font-weight: 600;
+    color: var(--color-blue);
+    font-variant-numeric: tabular-nums;
+  }
+  .sim-result {
+    background: linear-gradient(135deg, #007AFF, #5856D6);
+    color: white;
+    padding: 24px;
+    border-radius: var(--radius-md);
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .sim-result .label { font-size: 0.8125rem; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.04em; }
+  .sim-result .value { font-size: 1.875rem; font-weight: 700; margin-top: 4px; }
+
+  /* ===== Empty state for unbuilt tabs ===== */
+  .empty-state {
+    padding: 80px 40px;
+    text-align: center;
+    color: var(--color-text-secondary);
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--color-border);
+  }
+  .empty-state h3 { color: var(--color-text-primary); margin-bottom: 8px; font-size: 1.0625rem; }
+  .empty-state ul {
+    text-align: left; max-width: 600px; margin: 24px auto 0;
+    padding-left: 20px;
+    line-height: 1.8;
+  }
+
+  /* ===== Status badges ===== */
+  .status-row {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .stat-box {
+    flex: 1;
+    background: var(--color-background);
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+  }
+  .stat-box .label { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-box .val { font-size: 1.25rem; font-weight: 600; margin-top: 4px; }
+
+  /* ===== Notes ===== */
+  .mockup-note {
+    background: #FFF9E6;
+    border: 1px solid #F0D67A;
+    color: #856300;
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    margin-bottom: 24px;
+  }
+
+  /* ===== Upload UI (tab Dados) ===== */
+  .upload-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .upload-card {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-soft);
+    box-shadow: var(--shadow-sm);
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .upload-card.has-file {
+    border-color: var(--color-green);
+    box-shadow: 0 0 0 3px var(--color-green-light);
+  }
+  .upload-icon { font-size: 1.5rem; }
+  .upload-title { font-weight: 600; font-size: 1rem; }
+  .upload-meta {
+    color: var(--color-text-secondary);
+    font-size: 0.8125rem;
+    margin-bottom: 8px;
+  }
+  .upload-drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
+    padding: 24px 12px;
+    border: 1.5px dashed var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    background: var(--color-background);
+    transition: all 0.15s;
+  }
+  .upload-drop:hover, .upload-drop.drag-over {
+    border-color: var(--color-blue);
+    background: var(--color-blue-light);
+  }
+  .upload-cta { font-weight: 600; font-size: 0.9rem; color: var(--color-blue); }
+  .upload-hint { font-size: 0.75rem; color: var(--color-text-tertiary); }
+  .upload-status {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    padding-top: 4px;
+    min-height: 1.4em;
+  }
+  .upload-status .pill { margin-right: 6px; }
+  .upload-actions {
+    display: flex; gap: 12px; justify-content: flex-end;
+    padding-top: 8px;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-content">
+    <div class="app-title">
+      <div class="logo">MCF</div>
+      <span>Otimização de Aproveitamento</span>
+    </div>
+    <div class="header-meta">
+      <span>Última atualização: 12/05/2026</span>
+      <div class="user-pill">
+        <div class="avatar">GB</div>
+        Gonçalo Barata · Admin
+      </div>
+    </div>
+  </div>
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="validacao">Validação Histórica</button>
+    <button class="tab-btn" data-tab="simulador">Simulador</button>
+    <button class="tab-btn" data-tab="compra">Compra</button>
+    <button class="tab-btn" data-tab="triagem">Triagem</button>
+    <button class="tab-btn" data-tab="combinacoes">Combinações</button>
+    <button class="tab-btn" data-tab="dados">Dados</button>
+    <button class="tab-btn" data-tab="premissas">Premissas</button>
+    <button class="tab-btn" data-tab="admin">Admin</button>
+  </nav>
+</header>
+
+<main>
+
+  <div class="mockup-note">
+    <strong>Mockup v0.3 — modelo com restrições reais.</strong> Otimização linear constrangida por: demanda (<code>ProducaoMCF × 3</code>), regras de triagem (<code>Lógica triagem atual</code>), 3 gamas reais de compra (<code>&gt;150&lt;250</code>, <code>&gt;150</code> Canter, <code>&gt;250</code>) e granularidade de lote (~50 m³/dia × 2 turnos por ref). Resultado preliminar: <strong>€687k/ano teto teórico</strong> para 47% da cesta mapeada. Números ainda parcialmente ilustrativos.
+  </div>
+
+  <!-- ============== DASHBOARD ============== -->
+  <section class="tab-content active" id="tab-dashboard">
+
+    <div class="hero">
+      <div class="hero-left">
+        <h2>Potencial não capturado</h2>
+        <div class="big-number">€687.000 / ano</div>
+        <div class="subtitle">
+          Teto teórico para 47% da cesta · estimativa realista <strong>€275-410k/ano</strong> alcançáveis
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="row"><span class="label">Cesta anual (ProducaoMCF × 3)</span><span class="value">38.055 m³</span></div>
+        <div class="row"><span class="label">Porção mapeada no modelo</span><span class="value">17.889 m³</span></div>
+        <div class="row"><span class="label">Ton/ano poupadas (teto)</span><span class="value">8.089 ton</span></div>
+        <div class="row"><span class="label">€/ton média</span><span class="value">85 €</span></div>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Rácio atual ton/m³</div>
+        <div class="kpi-value">2.13</div>
+        <span class="kpi-delta flat">Canónico (operacional)</span>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Rácio ótimo estimado</div>
+        <div class="kpi-value" style="color:var(--color-green)">1.68</div>
+        <span class="kpi-delta up">▼ -0.45 ton/m³ (-21%)</span>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Combinações viáveis (Folha5)</div>
+        <div class="kpi-value">12.787</div>
+        <span class="kpi-delta flat">32 tábuas × ~27 costaneiros × 15 Ø</span>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Refs mapeadas na cesta</div>
+        <div class="kpi-value">49 / 76</div>
+        <span class="kpi-delta flat">27 refs (B) fora do modelo</span>
+      </div>
+    </div>
+
+    <!-- ============== VISÃO SISTÉMICA ============== -->
+    <div class="panel" style="margin-bottom:24px;">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">⚙️ Visão Sistémica — o fluxo completo, antes vs depois</div>
+          <div class="panel-subtitle">Compras → Triagem → Produção → Demanda. Tudo balanceado end-to-end. Sem dupla contagem.</div>
+        </div>
+        <span class="pill pill-blue">Mesma cesta de produtos satisfeita em ambos os cenários</span>
+      </div>
+
+      <!-- COMPRAS -->
+      <div style="margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+          <div style="font-weight:600; font-size:0.95rem;">📦 Compras de rolaria <span style="color:var(--color-text-secondary); font-weight:400;">(ton/ano)</span></div>
+          <div style="font-size:0.8125rem;"><span class="delta-positive">-1.350 ton</span> · <span class="delta-positive">€114.750 mais barato</span></div>
+        </div>
+        <table style="width:100%; font-size:0.875rem; border-collapse:collapse;">
+          <thead><tr style="border-bottom:1px solid var(--color-border-soft);">
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Gama</th>
+            <th style="text-align:center; padding:6px 8px; color:var(--color-red); font-weight:600;">AS IS</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-red); font-weight:600;">% atual</th>
+            <th style="text-align:center; padding:6px 8px; color:var(--color-green); font-weight:600;">TO BE</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-green); font-weight:600;">% ótima</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Δ</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;">&gt;150 e &lt;250mm</td><td class="num" style="text-align:center;">36.612</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:45%; border-radius:3px; display:inline-block;"></div> 45%</td><td class="num" style="text-align:center;">42.084</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:52%; border-radius:3px; display:inline-block;"></div> 52%</td><td class="num delta-positive">+5.472</td></tr>
+            <tr><td style="padding:6px 8px;">&gt;150 (Canter)</td><td class="num" style="text-align:center;">24.408</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:30%; border-radius:3px; display:inline-block;"></div> 30%</td><td class="num" style="text-align:center;">17.806</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:22%; border-radius:3px; display:inline-block;"></div> 22%</td><td class="num delta-negative">-6.602</td></tr>
+            <tr><td style="padding:6px 8px;">&gt;250mm</td><td class="num" style="text-align:center;">20.340</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:25%; border-radius:3px; display:inline-block;"></div> 25%</td><td class="num" style="text-align:center;">21.070</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:26%; border-radius:3px; display:inline-block;"></div> 26%</td><td class="num delta-positive">+730</td></tr>
+            <tr style="background:var(--color-background); font-weight:600;"><td style="padding:6px 8px;">TOTAL</td><td class="num" style="text-align:center;">81.360</td><td></td><td class="num" style="text-align:center;">80.960</td><td></td><td class="num delta-positive">-400</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TRIAGEM -->
+      <div style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+          <div style="font-weight:600; font-size:0.95rem;">🔍 Triagem — distribuição interna pós-raio-X <span style="color:var(--color-text-secondary); font-weight:400;">(% rolaria)</span></div>
+          <div style="font-size:0.8125rem;"><span class="delta-positive">-1.900 ton via redistribuição</span></div>
+        </div>
+        <table style="width:100%; font-size:0.875rem; border-collapse:collapse;">
+          <thead><tr style="border-bottom:1px solid var(--color-border-soft);">
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Gama Ø</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Linha destino</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-red); font-weight:600;">% atual</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-green); font-weight:600;">% ótima</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Δ pp</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;">&lt;180mm</td><td style="padding:6px 8px;">01.1 (tábuas estreitas)</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:18%; border-radius:3px; display:inline-block;"></div> 18%</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:15%; border-radius:3px; display:inline-block;"></div> 15%</td><td class="num delta-negative">-3</td></tr>
+            <tr><td style="padding:6px 8px;">181-210mm</td><td style="padding:6px 8px;">01.1</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:28%; border-radius:3px; display:inline-block;"></div> 28%</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:25%; border-radius:3px; display:inline-block;"></div> 25%</td><td class="num delta-negative">-3</td></tr>
+            <tr><td style="padding:6px 8px;">211-240mm</td><td style="padding:6px 8px;">01.1</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:32%; border-radius:3px; display:inline-block;"></div> 32%</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:34%; border-radius:3px; display:inline-block;"></div> 34%</td><td class="num delta-positive">+2</td></tr>
+            <tr><td style="padding:6px 8px;">241-280mm</td><td style="padding:6px 8px;">01.1 (mais para cá agora)</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:16%; border-radius:3px; display:inline-block;"></div> 16%</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:20%; border-radius:3px; display:inline-block;"></div> 20%</td><td class="num delta-positive">+4</td></tr>
+            <tr><td style="padding:6px 8px;">&gt;280mm</td><td style="padding:6px 8px;">02.2 (tábuas/duplos)</td><td style="padding:0 8px;"><div style="background:var(--color-red-light); height:12px; width:6%; border-radius:3px; display:inline-block;"></div> 6%</td><td style="padding:0 8px;"><div style="background:var(--color-green-light); height:12px; width:6%; border-radius:3px; display:inline-block;"></div> 6%</td><td class="num delta-positive">0</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PRODUÇÃO -->
+      <div style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+          <div style="font-weight:600; font-size:0.95rem;">🏭 Produção por linha <span style="color:var(--color-text-secondary); font-weight:400;">(m³/ano)</span></div>
+          <div style="font-size:0.8125rem; color:var(--color-text-secondary);">Demanda total fixa: 38.055 m³</div>
+        </div>
+        <table style="width:100%; font-size:0.875rem; border-collapse:collapse;">
+          <thead><tr style="border-bottom:1px solid var(--color-border-soft);">
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Linha</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Tipo</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-red); font-weight:600;">AS IS</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-green); font-weight:600;">TO BE</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Δ</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;">01.1</td><td style="padding:6px 8px;">P · Principal</td><td class="num">21.842</td><td class="num">22.260</td><td class="num delta-positive">+418</td></tr>
+            <tr><td style="padding:6px 8px;">01.2</td><td style="padding:6px 8px;">P 2ª</td><td class="num">892</td><td class="num">878</td><td class="num delta-negative">-14</td></tr>
+            <tr><td style="padding:6px 8px;">02.2</td><td style="padding:6px 8px;">T · Tábuas compridas</td><td class="num">786</td><td class="num">702</td><td class="num delta-negative">-84</td></tr>
+            <tr><td style="padding:6px 8px;">02.3</td><td style="padding:6px 8px;">Duplos</td><td class="num">~125</td><td class="num">~118</td><td class="num delta-negative">-7</td></tr>
+            <tr><td style="padding:6px 8px;">03.x</td><td style="padding:6px 8px;">C · Costaneiros</td><td class="num">1.131</td><td class="num">1.244</td><td class="num delta-positive">+113</td></tr>
+            <tr><td style="padding:6px 8px;">04/05</td><td style="padding:6px 8px;">Retestagem</td><td class="num">~4.617</td><td class="num">~4.480</td><td class="num delta-negative">-137</td></tr>
+            <tr style="opacity:0.6;"><td style="padding:6px 8px;">02.1</td><td style="padding:6px 8px;">B · Barrotes (fora scope)</td><td class="num">4.254</td><td class="num">4.254</td><td class="num">—</td></tr>
+            <tr style="background:var(--color-background); font-weight:600;"><td style="padding:6px 8px;">TOTAL</td><td></td><td class="num">33.647</td><td class="num">33.936</td><td class="num delta-positive">+289</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- DEMANDA -->
+      <div style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+          <div style="font-weight:600; font-size:0.95rem;">✅ Demanda — satisfação por classe</div>
+          <div style="font-size:0.8125rem; color:var(--color-green); font-weight:600;">100% satisfeita em ambos os cenários</div>
+        </div>
+        <table style="width:100%; font-size:0.875rem; border-collapse:collapse;">
+          <thead><tr style="border-bottom:1px solid var(--color-border-soft);">
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Classe</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Refs</th>
+            <th class="num" style="text-align:right; padding:6px 8px; color:var(--color-text-secondary); font-weight:500;">Demanda anual (m³)</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-red); font-weight:600;">AS IS cobertura</th>
+            <th style="text-align:left; padding:6px 8px; color:var(--color-green); font-weight:600;">TO BE cobertura</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;">P (Principal)</td><td style="padding:6px 8px;">26</td><td class="num">22.413</td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td></tr>
+            <tr><td style="padding:6px 8px;">C (Costaneiros)</td><td style="padding:6px 8px;">14</td><td class="num">4.293</td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td></tr>
+            <tr><td style="padding:6px 8px;">T (Tábuas compridas)</td><td style="padding:6px 8px;">8</td><td class="num">786</td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td></tr>
+            <tr><td style="padding:6px 8px;">2ª</td><td style="padding:6px 8px;">5</td><td class="num">402</td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td><td style="padding:6px 8px;"><span class="pill pill-green" style="font-size:0.7rem;">100%</span></td></tr>
+            <tr style="opacity:0.6;"><td style="padding:6px 8px;">B (Barrotes - fora scope)</td><td style="padding:6px 8px;">23</td><td class="num">10.125</td><td style="padding:6px 8px;"><span class="pill pill-grey" style="font-size:0.7rem;">—</span></td><td style="padding:6px 8px;"><span class="pill pill-grey" style="font-size:0.7rem;">—</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="background:var(--color-blue-light); padding:14px 18px; border-radius:var(--radius-sm); margin-top:20px; font-size:0.875rem;">
+        <strong style="color:var(--color-blue);">📌 Como ler:</strong> O TO BE produz a mesma cesta de produtos (demanda 100% satisfeita) consumindo <strong>-400 ton</strong> de rolaria (compras), através de redistribuição interna (mais 211-280mm, menos &lt;210mm) e ajustes em cortes. Linha 02.2 produz menos tábuas compridas (porque mais 241-280mm vai para 01.1), pelo que retestagem L04/L05 também diminui — sinal de que <strong>fluxos secundários estão coerentes</strong>.
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Recomendações por categoria</div>
+            <div class="panel-subtitle">Os 3 outputs do modelo · cada um liga à respetiva tab para drill-down</div>
+          </div>
+        </div>
+        <div class="lever-list">
+          <div class="lever-row" data-nav-to="combinacoes">
+            <div class="lever-rank">🔪</div>
+            <div>
+              <div class="lever-title">Combinações de corte — 800×145×22, 1200×100×22, 1000×98×22</div>
+              <div class="lever-detail">3 refs principais com aproveitamento sub-ótimo. Trocar costaneiro padrão em 60% da produção</div>
+            </div>
+            <span class="pill pill-blue">Combinações</span>
+            <div class="lever-impact">-4.200 ton</div>
+            <div class="lever-euros">€357.000</div>
+          </div>
+          <div class="lever-row" data-nav-to="triagem">
+            <div class="lever-rank">🔍</div>
+            <div>
+              <div class="lever-title">Triagem — ajustar fronteiras 2500mm (181-210 vs 211-240)</div>
+              <div class="lever-detail">Fronteira atual perde paus 200-215mm em gama errada. Mover para 215mm captura mais 145×22</div>
+            </div>
+            <span class="pill pill-blue">Triagem</span>
+            <div class="lever-impact">-1.900 ton</div>
+            <div class="lever-euros">€161.000</div>
+          </div>
+          <div class="lever-row" data-nav-to="compra">
+            <div class="lever-rank">📦</div>
+            <div>
+              <div class="lever-title">Compra — mais "&gt;150&lt;250" e menos "&gt;150" (Canter)</div>
+              <div class="lever-detail">Canter tem Ø muito variável; aposta na gama controlada para refs de 1200×95×14 e 800×145×22</div>
+            </div>
+            <span class="pill pill-blue">Compra</span>
+            <div class="lever-impact">-1.350 ton</div>
+            <div class="lever-euros">€114.750</div>
+          </div>
+          <div class="lever-row" data-nav-to="combinacoes">
+            <div class="lever-rank">🔪</div>
+            <div>
+              <div class="lever-title">Combinações — costaneiros 70×13 / 70×14 sub-utilizados</div>
+              <div class="lever-detail">7 refs C sobrantes da cesta poderiam ser produzidas com tábuas P maiores em vez de produção dedicada</div>
+            </div>
+            <span class="pill pill-blue">Combinações</span>
+            <div class="lever-impact">-440 ton</div>
+            <div class="lever-euros">€37.400</div>
+          </div>
+          <div class="lever-row" data-nav-to="compra">
+            <div class="lever-rank">📦</div>
+            <div>
+              <div class="lever-title">Compra — reduzir "&gt;250" em 4pp</div>
+              <div class="lever-detail">Atualmente sobra Ø grande não rentabilizado nas linhas; redirecionar para "&gt;150&lt;250"</div>
+            </div>
+            <span class="pill pill-blue">Compra</span>
+            <div class="lever-impact">-210 ton</div>
+            <div class="lever-euros">€17.850</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Evolução do aproveitamento</div>
+            <div class="panel-subtitle">Últimos 12 meses · real vs. teto teórico</div>
+          </div>
+        </div>
+        <div class="barchart">
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:55%"></div><div class="bar sugg" style="height:67%"></div></div><div class="bar-label">Jun/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:54%"></div><div class="bar sugg" style="height:66%"></div></div><div class="bar-label">Jul/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:56%"></div><div class="bar sugg" style="height:68%"></div></div><div class="bar-label">Ago/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:58%"></div><div class="bar sugg" style="height:70%"></div></div><div class="bar-label">Set/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:57%"></div><div class="bar sugg" style="height:69%"></div></div><div class="bar-label">Out/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:59%"></div><div class="bar sugg" style="height:71%"></div></div><div class="bar-label">Nov/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:60%"></div><div class="bar sugg" style="height:72%"></div></div><div class="bar-label">Dez/25</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:62%"></div><div class="bar sugg" style="height:74%"></div></div><div class="bar-label">Jan/26</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:60%"></div><div class="bar sugg" style="height:72%"></div></div><div class="bar-label">Fev/26</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:63%"></div><div class="bar sugg" style="height:74%"></div></div><div class="bar-label">Mar/26</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:65%"></div><div class="bar sugg" style="height:76%"></div></div><div class="bar-label">Abr/26</div></div>
+          <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:64%"></div><div class="bar sugg" style="height:76%"></div></div><div class="bar-label">Mai/26</div></div>
+        </div>
+        <div class="chart-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--color-blue)"></div>Real</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--color-green);opacity:0.7"></div>Teto teórico</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== VALIDAÇÃO HISTÓRICA ============== -->
+  <section class="tab-content" id="tab-validacao">
+    <h2 class="section-title">Validação Histórica</h2>
+    <p class="section-subtitle">Para cada mês: cesta produzida (de <code>MCF data</code>) é a <strong>restrição</strong>. App calcula menor consumo de rolaria possível, e <strong>decompõe o ganho em 3 alavancas</strong>: 🔪 Combinações · 🔍 Triagem · 📦 Compra.</p>
+
+    <div class="status-row">
+      <div class="stat-box">
+        <div class="label">Ton real (12M)</div>
+        <div class="val">91.530 ton</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Ton ótima (modelo)</div>
+        <div class="val" style="color:var(--color-green)">87.930 ton</div>
+      </div>
+      <div class="stat-box" style="border-left: 3px solid var(--color-blue)">
+        <div class="label">🔪 Δ Combinações</div>
+        <div class="val" style="color:var(--color-green); font-size:1.1rem;">-2.150 ton · €182.750</div>
+      </div>
+      <div class="stat-box" style="border-left: 3px solid var(--color-orange)">
+        <div class="label">🔍 Δ Triagem</div>
+        <div class="val" style="color:var(--color-green); font-size:1.1rem;">-870 ton · €73.950</div>
+      </div>
+      <div class="stat-box" style="border-left: 3px solid var(--color-green)">
+        <div class="label">📦 Δ Compra</div>
+        <div class="val" style="color:var(--color-green); font-size:1.1rem;">-580 ton · €49.300</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Comparação mês-a-mês — decomposta por alavanca</div>
+          <div class="panel-subtitle">Clica numa linha para ver as mudanças concretas que produziriam o ganho desse mês</div>
+        </div>
+        <div class="filter-bar">
+          <select><option>Últimos 12 meses</option><option>2026 YTD</option><option>2025 completo</option></select>
+          <button class="btn btn-ghost">Exportar CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Mês</th>
+              <th class="num">m³ prod.</th>
+              <th class="num">Ton real</th>
+              <th class="num">Ton ótima</th>
+              <th class="num" style="color:var(--color-blue)">🔪 Comb.<br><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem">Δ ton</span></th>
+              <th class="num" style="color:var(--color-orange)">🔍 Triagem<br><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem">Δ ton</span></th>
+              <th class="num" style="color:var(--color-green)">📦 Compra<br><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem">Δ ton</span></th>
+              <th class="num">Δ Total</th>
+              <th class="num">Ganho (€)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Jun/25</td><td class="num">1.728</td><td class="num">7.842</td><td class="num">7.497</td><td class="num delta-positive">-180</td><td class="num delta-positive">-105</td><td class="num delta-positive">-60</td><td class="num delta-positive">-345</td><td class="num delta-positive">€29.330</td></tr>
+            <tr><td>Jul/25</td><td class="num">1.682</td><td class="num">7.621</td><td class="num">7.286</td><td class="num delta-positive">-215</td><td class="num delta-positive">-75</td><td class="num delta-positive">-45</td><td class="num delta-positive">-335</td><td class="num delta-positive">€28.510</td></tr>
+            <tr><td>Ago/25</td><td class="num">1.428</td><td class="num">6.405</td><td class="num">6.130</td><td class="num delta-positive">-160</td><td class="num delta-positive">-70</td><td class="num delta-positive">-45</td><td class="num delta-positive">-275</td><td class="num delta-positive">€23.420</td></tr>
+            <tr><td>Set/25</td><td class="num">1.836</td><td class="num">8.103</td><td class="num">7.771</td><td class="num delta-positive">-205</td><td class="num delta-positive">-80</td><td class="num delta-positive">-47</td><td class="num delta-positive">-332</td><td class="num delta-positive">€28.230</td></tr>
+            <tr><td>Out/25</td><td class="num">1.905</td><td class="num">8.451</td><td class="num">8.105</td><td class="num delta-positive">-200</td><td class="num delta-positive">-95</td><td class="num delta-positive">-51</td><td class="num delta-positive">-346</td><td class="num delta-positive">€29.450</td></tr>
+            <tr><td>Nov/25</td><td class="num">1.798</td><td class="num">7.890</td><td class="num">7.582</td><td class="num delta-positive">-165</td><td class="num delta-positive">-90</td><td class="num delta-positive">-53</td><td class="num delta-positive">-308</td><td class="num delta-positive">€26.140</td></tr>
+            <tr><td>Dez/25</td><td class="num">1.184</td><td class="num">5.124</td><td class="num">4.934</td><td class="num delta-positive">-115</td><td class="num delta-positive">-50</td><td class="num delta-positive">-25</td><td class="num delta-positive">-190</td><td class="num delta-positive">€16.110</td></tr>
+            <tr><td>Jan/26</td><td class="num">1.927</td><td class="num">8.245</td><td class="num">7.965</td><td class="num delta-positive">-170</td><td class="num delta-positive">-70</td><td class="num delta-positive">-40</td><td class="num delta-positive">-280</td><td class="num delta-positive">€23.820</td></tr>
+            <tr><td>Fev/26</td><td class="num">1.760</td><td class="num">7.652</td><td class="num">7.384</td><td class="num delta-positive">-160</td><td class="num delta-positive">-65</td><td class="num delta-positive">-43</td><td class="num delta-positive">-268</td><td class="num delta-positive">€22.760</td></tr>
+            <tr><td>Mar/26</td><td class="num">1.952</td><td class="num">8.318</td><td class="num">8.052</td><td class="num delta-positive">-170</td><td class="num delta-positive">-55</td><td class="num delta-positive">-41</td><td class="num delta-positive">-266</td><td class="num delta-positive">€22.620</td></tr>
+            <tr id="row-abr26" style="background:var(--color-blue-light); cursor:pointer; border-left:3px solid var(--color-blue);"><td><strong>Abr/26 ▾</strong></td><td class="num">1.918</td><td class="num">8.045</td><td class="num">7.812</td><td class="num delta-positive">-150</td><td class="num delta-positive">-50</td><td class="num delta-positive">-33</td><td class="num delta-positive"><strong>-233</strong></td><td class="num delta-positive"><strong>€19.830</strong></td></tr>
+            <tr><td>Mai/26</td><td class="num">1.866</td><td class="num">7.834</td><td class="num">7.607</td><td class="num delta-positive">-130</td><td class="num delta-positive">-60</td><td class="num delta-positive">-37</td><td class="num delta-positive">-227</td><td class="num delta-positive">€19.310</td></tr>
+            <tr class="summary"><td>Total</td><td class="num">20.984</td><td class="num">91.530</td><td class="num">87.125</td><td class="num delta-positive">-2.020</td><td class="num delta-positive">-865</td><td class="num delta-positive">-520</td><td class="num delta-positive">-3.405</td><td class="num delta-positive">€289.530</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" style="border-left: 4px solid var(--color-blue);">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Drill-down: Abr/26 — porque é que se podiam ter poupado 233 ton</div>
+          <div class="panel-subtitle">Cada alavanca decomposta em mudanças concretas e verificáveis nos dados do mês</div>
+        </div>
+        <span class="pill pill-blue">€19.830 / mês · €237.960 anualizado se aplicado todo o ano</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; margin-top:8px;">
+        <!-- COMBINAÇÕES -->
+        <div style="background:var(--color-background); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--color-blue);">
+          <div style="font-weight:600; font-size:0.95rem; margin-bottom:4px;">🔪 Combinações</div>
+          <div style="font-size:1.5rem; font-weight:700; color:var(--color-green); margin-bottom:12px;">-150 ton</div>
+          <ul style="list-style:none; padding:0; margin:0; font-size:0.8125rem; line-height:1.6;">
+            <li style="padding:8px 0; border-bottom:1px solid var(--color-border-soft);">
+              <div style="font-weight:600;">1200×100×22 (P)</div>
+              <div style="color:var(--color-text-secondary);">389 m³ produzidos · cortado com cost. <strong style="color:var(--color-red)">95×14</strong></div>
+              <div style="color:var(--color-text-secondary);">→ recomenda cost. <strong style="color:var(--color-green)">90×14</strong></div>
+              <div style="color:var(--color-green); font-weight:600;">-90 ton</div>
+            </li>
+            <li style="padding:8px 0; border-bottom:1px solid var(--color-border-soft);">
+              <div style="font-weight:600;">800×145×22 (P)</div>
+              <div style="color:var(--color-text-secondary);">352 m³ · gama Ø atual <strong style="color:var(--color-red)">181-210mm</strong></div>
+              <div style="color:var(--color-text-secondary);">→ recomenda gama <strong style="color:var(--color-green)">211-260mm</strong> + cost. 100×22</div>
+              <div style="color:var(--color-green); font-weight:600;">-45 ton</div>
+            </li>
+            <li style="padding:8px 0;">
+              <div style="font-weight:600;">1200×95×14 (P)</div>
+              <div style="color:var(--color-text-secondary);">186 m³ · cost. atual <strong style="color:var(--color-red)">70×13</strong></div>
+              <div style="color:var(--color-text-secondary);">→ recomenda cost. <strong style="color:var(--color-green)">70×14</strong></div>
+              <div style="color:var(--color-green); font-weight:600;">-15 ton</div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- TRIAGEM -->
+        <div style="background:var(--color-background); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--color-orange);">
+          <div style="font-weight:600; font-size:0.95rem; margin-bottom:4px;">🔍 Triagem</div>
+          <div style="font-size:1.5rem; font-weight:700; color:var(--color-green); margin-bottom:12px;">-50 ton</div>
+          <ul style="list-style:none; padding:0; margin:0; font-size:0.8125rem; line-height:1.6;">
+            <li style="padding:8px 0; border-bottom:1px solid var(--color-border-soft);">
+              <div style="font-weight:600;">Fronteira 2500mm: <strong style="color:var(--color-red)">211-240</strong> → <strong style="color:var(--color-green)">215-240</strong></div>
+              <div style="color:var(--color-text-secondary);">Captura mais paus Ø 211-215mm em gama 181-210 (que aceita tábua até 100mm em vez de 144mm)</div>
+              <div style="color:var(--color-green); font-weight:600;">-35 ton</div>
+            </li>
+            <li style="padding:8px 0;">
+              <div style="font-weight:600;">Fronteira 2600mm: <strong style="color:var(--color-red)">211-260</strong> → <strong style="color:var(--color-green)">211-250</strong></div>
+              <div style="color:var(--color-text-secondary);">Reservar paus 250-260mm para tábuas/duplos da linha 02.2</div>
+              <div style="color:var(--color-green); font-weight:600;">-15 ton</div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- COMPRA -->
+        <div style="background:var(--color-background); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--color-green);">
+          <div style="font-weight:600; font-size:0.95rem; margin-bottom:4px;">📦 Compra</div>
+          <div style="font-size:1.5rem; font-weight:700; color:var(--color-green); margin-bottom:12px;">-33 ton</div>
+          <ul style="list-style:none; padding:0; margin:0; font-size:0.8125rem; line-height:1.6;">
+            <li style="padding:8px 0;">
+              <div style="font-weight:600;">Mix de compra do mês</div>
+              <div style="color:var(--color-text-secondary); margin-top:4px;">
+                <div>Atual: <strong style="color:var(--color-red)">45% / 30% / 25%</strong></div>
+                <div style="font-size:0.75rem;">(&gt;150&lt;250 · Canter · &gt;250)</div>
+              </div>
+              <div style="color:var(--color-text-secondary); margin-top:6px;">
+                <div>Ótimo: <strong style="color:var(--color-green)">52% / 22% / 26%</strong></div>
+                <div style="font-size:0.75rem;">↑ gama controlada · ↓ Canter</div>
+              </div>
+              <div style="color:var(--color-green); font-weight:600; margin-top:4px;">-33 ton</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding:12px; background:#FFF9E6; border:1px solid #F0D67A; border-radius:var(--radius-sm); font-size:0.8125rem; color:#856300;">
+        ⚠️ <strong>Nota sobre fiabilidade dos números:</strong> Os splits 🔪/🔍/📦 acima são <strong>estimativas</strong>. Cálculo definitivo requer LP completo com restrições de triagem + co-produto. Os totais por mês (-233 ton, €19.830) usam baseline "média Folha5" — número final muda quando substituirmos por baseline real do MCF data.
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Ton de rolaria consumida: real vs. ótimo</div>
+          <div class="panel-subtitle">Para cada mês, a barra verde é o que teria sido suficiente para produzir a mesma cesta</div>
+        </div>
+      </div>
+      <div class="barchart">
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:54%"></div><div class="bar sugg" style="height:67%"></div></div><div class="bar-label">Jun/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:53%"></div><div class="bar sugg" style="height:66%"></div></div><div class="bar-label">Jul/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:55%"></div><div class="bar sugg" style="height:67%"></div></div><div class="bar-label">Ago/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:57%"></div><div class="bar sugg" style="height:69%"></div></div><div class="bar-label">Set/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:57%"></div><div class="bar sugg" style="height:68%"></div></div><div class="bar-label">Out/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:59%"></div><div class="bar sugg" style="height:70%"></div></div><div class="bar-label">Nov/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:60%"></div><div class="bar sugg" style="height:71%"></div></div><div class="bar-label">Dez/25</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:62%"></div><div class="bar sugg" style="height:72%"></div></div><div class="bar-label">Jan/26</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:60%"></div><div class="bar sugg" style="height:70%"></div></div><div class="bar-label">Fev/26</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:63%"></div><div class="bar sugg" style="height:72%"></div></div><div class="bar-label">Mar/26</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:65%"></div><div class="bar sugg" style="height:73%"></div></div><div class="bar-label">Abr/26</div></div>
+        <div class="bar-group"><div class="bar-pair"><div class="bar real" style="height:64%"></div><div class="bar sugg" style="height:72%"></div></div><div class="bar-label">Mai/26</div></div>
+      </div>
+      <div class="chart-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--color-blue)"></div>Ton rolaria real</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--color-green);opacity:0.7"></div>Ton rolaria ótima (mesma cesta)</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== SIMULADOR ============== -->
+  <section class="tab-content" id="tab-simulador">
+    <h2 class="section-title">Simulador "E se…"</h2>
+    <p class="section-subtitle">Cesta de referência: <strong>últimos 12 meses</strong>. Ajusta alavancas para ver quantas <strong>ton de rolaria</strong> seriam necessárias para produzir essa mesma cesta.</p>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Mix de compra (3 gamas reais)</div>
+            <div class="panel-subtitle">Categorias disponíveis no mercado · não as gamas geométricas internas</div>
+          </div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">&gt;150 e &lt;250mm</div>
+          <input type="range" min="0" max="100" value="45">
+          <div class="slider-value">45%</div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">&gt;150mm (Canter)</div>
+          <input type="range" min="0" max="100" value="30">
+          <div class="slider-value">30%</div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">&gt;250mm</div>
+          <input type="range" min="0" max="100" value="25">
+          <div class="slider-value">25%</div>
+        </div>
+        <div class="slider-row" style="background:var(--color-background); margin-top:8px; padding:8px 12px; border-radius:8px; font-size:0.8125rem; color:var(--color-text-secondary)">
+          <div style="grid-column:1/-1">⓵ A app distribui automaticamente cada gama comprada pelos diâmetros reais (via raio-X) e aplica as regras de triagem para cada linha.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Combinações padrão</div>
+            <div class="panel-subtitle">Para cada tábua principal, qual o costaneiro</div>
+          </div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">Tábua 80×15</div>
+          <select style="grid-column:2/3"><option>Costaneiro 70×13 (atual)</option><option selected>Costaneiro 70×14 (sugerido)</option><option>Costaneiro 75×13</option></select>
+          <div class="slider-value">+0.8pp</div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">Tábua 100×22</div>
+          <select style="grid-column:2/3"><option selected>Costaneiro 95×14 (atual)</option><option>Costaneiro 90×14</option><option>Costaneiro 95×18</option></select>
+          <div class="slider-value">0.0pp</div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">Tábua 130×18</div>
+          <select style="grid-column:2/3"><option>Costaneiro 90×18 (atual)</option><option selected>Costaneiro 95×18</option></select>
+          <div class="slider-value">+0.3pp</div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">Tábua 138×20</div>
+          <select style="grid-column:2/3"><option selected>Costaneiro 98×20 (atual)</option><option>Costaneiro 100×22</option></select>
+          <div class="slider-value">0.0pp</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Resultado do cenário</div>
+          <div class="panel-subtitle">Recalculado em tempo real conforme ajustas alavancas acima</div>
+        </div>
+      </div>
+      <div class="sim-result">
+        <div>
+          <div class="label">Ton rolaria neste cenário</div>
+          <div class="value">89.430</div>
+          <div style="margin-top:6px;opacity:0.85;">-2.100 ton vs. real (91.530)</div>
+        </div>
+        <div>
+          <div class="label">Ganho anualizado</div>
+          <div class="value">€178.500</div>
+          <div style="margin-top:6px;opacity:0.85;">Mesma cesta · ~2.100 ton/ano poupadas</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Empty / placeholder tabs ============== -->
+  <section class="tab-content" id="tab-compra">
+    <h2 class="section-title">Compra</h2>
+    <p class="section-subtitle">Output #3 do modelo: mix ótimo entre as 3 gamas reais de compra.</p>
+    <div class="empty-state">
+      <h3>Conteúdo da tab Compra (a desenhar)</h3>
+      <ul>
+        <li><strong>Tabela AS IS vs TO BE</strong> nas 3 categorias reais: <code>&gt;150 e &lt;250</code>, <code>&gt;150</code> (Canter mistura), <code>&gt;250</code></li>
+        <li>Histórico de preços por designação (todas as variantes 2,52/25, 2,60/CANTER, etc.) jan/25 a hoje</li>
+        <li>Para cada gama: <strong>€/m³ útil</strong> = preço €/ton ÷ aproveitamento esperado dessa gama na cesta</li>
+        <li>Recomendações: "↑ &gt;150&lt;250 em Xpp, ↓ Canter em Ypp → -Z ton/ano = +€W"</li>
+        <li>Restrições configuráveis: cota mínima por país (ES/PT), disponibilidade máx por gama, certificação</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="tab-content" id="tab-triagem">
+    <h2 class="section-title">Triagem</h2>
+    <p class="section-subtitle">Output #2 do modelo: ajuste das fronteiras de triagem para maximizar aproveitamento.</p>
+    <div class="empty-state">
+      <h3>Conteúdo da tab Triagem (a desenhar)</h3>
+      <ul>
+        <li><strong>Tabela atual</strong> (de <code>Lógica triagem atual</code>): comp × gama Ø → linha, larg min/max, esp máx</li>
+        <li>Cobertura: 2100mm (4 gamas) · 2500mm (5 gamas, com costaneiros) · 2600mm (4 gamas) · 2750mm <em>não usado</em></li>
+        <li><strong>Distribuição real</strong> de diâmetros à entrada (via raio-X, <code>Análise triagem</code>)</li>
+        <li>Sugestões de novas fronteiras: "mover 211-240 para 215-240 capturaria mais Ø no intervalo certo"</li>
+        <li>Tabela AS IS vs TO BE: para cada gama, intervalo atual + sugerido + impacto pp/€</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="tab-content" id="tab-combinacoes">
+    <h2 class="section-title">Combinações</h2>
+    <p class="section-subtitle">Output #1 do modelo: para cada referência produzida, o corte concreto recomendado.</p>
+
+    <div class="status-row">
+      <div class="stat-box"><div class="label">Refs analisadas</div><div class="val">49</div></div>
+      <div class="stat-box"><div class="label">Com ganho &gt;50 ton/ano</div><div class="val">17</div></div>
+      <div class="stat-box"><div class="label">Top 5 contribuem com</div><div class="val">62% do ganho</div></div>
+      <div class="stat-box" style="border-left: 3px solid var(--color-blue)"><div class="label">Ganho total categoria</div><div class="val" style="color:var(--color-green)">-4.200 ton · €357.000</div></div>
+    </div>
+
+    <div class="filter-bar">
+      <select><option>Ordenar: maior impacto</option><option>Ordenar: por ref</option><option>Ordenar: por linha</option></select>
+      <select><option>Todas as classes</option><option>P (Principal)</option><option>C (Costaneiro)</option><option>T (Tábuas)</option><option>2ª</option></select>
+      <select><option>Todas as linhas</option><option>01.1 Principal</option><option>01.2 P 2ª</option><option>03.1.x Costaneiros</option><option>02.2 Tábuas compridas</option></select>
+    </div>
+
+    <!-- REF 1: 800×145×22 -->
+    <div class="panel" style="border-left:4px solid var(--color-blue);">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">800×145×22 (P) · linha 01.1</div>
+          <div class="panel-subtitle">3.516 m³/ano produzidos · Top 1 contribuidor desta categoria</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="pill pill-green">Fácil</span>
+          <span class="pill pill-blue" style="font-size:0.95rem; padding:6px 14px;"><strong>-1.260 ton · €107.100/ano</strong></span>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:24px; align-items:start; padding:8px 0;">
+        <div style="background:var(--color-red-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600; margin-bottom:8px;">📊 Como produzes hoje</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2500mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>181-210mm</strong> (~62% prod)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>95×14</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>54.6%</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria atual</td><td><strong>7.490 ton/ano</strong></td></tr>
+          </table>
+        </div>
+        <div style="align-self:center; font-size:2rem; color:var(--color-text-tertiary);">→</div>
+        <div style="background:var(--color-green-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-green); font-weight:600; margin-bottom:8px;">✓ Como devias produzir</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2500mm</strong> (mantém)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>241-280mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>90×14</strong> (era 95×14)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>72.7%</strong> (+18.1pp)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria ótima</td><td><strong>6.230 ton/ano</strong></td></tr>
+          </table>
+        </div>
+      </div>
+      <div style="background:var(--color-blue-light); padding:14px 16px; border-radius:var(--radius-sm); margin-top:8px; font-size:0.875rem;">
+        <strong style="color:var(--color-blue);">Mudança operacional:</strong> Direcionar mais paus de 241-280mm para linha 01.1 desta ref (atualmente vão maioritariamente para 02.2). Ajuste de triagem necessário em paralelo (ver tab Triagem).<br>
+        <strong style="color:var(--color-blue);">Validação nos dados:</strong> em <code>MCF data</code>, filtra Z="800×145×22" e Y="01.1" → coluna N (Rol_L01) mostra as gamas reais consumidas.
+      </div>
+
+      <!-- BALANÇO DE MASSA -->
+      <div style="margin-top:12px; padding:16px; background:#FFFAF0; border:2px solid var(--color-orange); border-radius:var(--radius-sm);">
+        <div style="font-weight:700; color:var(--color-orange); margin-bottom:4px; display:flex; align-items:center; gap:8px;">⚖️ Implicações no balanço de massa</div>
+        <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-bottom:14px;">Esta mudança altera a produção de outras refs (costaneiros, fluxos secundários). Cada uma tem de continuar a satisfazer a sua própria demanda.</div>
+
+        <div style="overflow-x:auto;">
+        <table class="data" style="font-size:0.85rem;">
+          <thead>
+            <tr>
+              <th>Ref afetada</th>
+              <th>Origem da mudança</th>
+              <th class="num">Δ Prod (m³/ano)</th>
+              <th class="num">Demanda anual</th>
+              <th>Cobertura após mudança</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1200×95×14</strong> (cost. removido aqui)</td>
+              <td>Era co-produto desta combinação</td>
+              <td class="num delta-negative">-185</td>
+              <td class="num">132 m³</td>
+              <td>Sobra ainda em outras combinações de corte (410→225 m³) <strong>+</strong> 65 m³ via L02.2 retest. (<code>2500×95×14</code> → <code>1200×95×14</code>)</td>
+              <td><span class="pill pill-green">✓ Coberta</span><br><small style="color:var(--color-text-secondary)">excesso 158 m³</small></td>
+            </tr>
+            <tr>
+              <td><strong>1200×90×14</strong> (cost. novo aqui)</td>
+              <td>Passa a ser co-produto desta combinação</td>
+              <td class="num delta-positive">+185</td>
+              <td class="num">520 m³</td>
+              <td>Outras combinações (380 m³) + nova produção (185 m³) = 565 m³</td>
+              <td><span class="pill pill-green">✓ Coberta</span><br><small style="color:var(--color-text-secondary)">excesso 45 m³</small></td>
+            </tr>
+            <tr>
+              <td><strong>800×145×22</strong> (a tábua principal)</td>
+              <td>Mesma demanda, gama Ø diferente</td>
+              <td class="num delta-positive">+0 (mantém)</td>
+              <td class="num">3.516 m³</td>
+              <td>100% da demanda satisfeita pela nova combinação</td>
+              <td><span class="pill pill-green">✓ Coberta</span></td>
+            </tr>
+            <tr>
+              <td><strong>Paus Ø 181-210mm</strong> (gama "libertada")</td>
+              <td>Antes iam para esta combinação, agora vão para onde?</td>
+              <td class="num delta-positive">+ ton disponível</td>
+              <td class="num">—</td>
+              <td>Modelo redireciona para refs que aceitam essa gama (e.g. <code>1200×100×22</code>, <code>800×98×18</code>)</td>
+              <td><span class="pill pill-blue">⓵ Re-roteado</span></td>
+            </tr>
+            <tr>
+              <td><strong>Paus Ø 241-280mm</strong> (gama "puxada")</td>
+              <td>Antes maioritariamente em L02.2 tábuas/duplos</td>
+              <td class="num delta-negative">- ton necessária</td>
+              <td class="num">—</td>
+              <td>L02.2 vai produzir <strong>menos</strong> tábuas compridas → retestagem L04/L05 abranda</td>
+              <td><span class="pill pill-orange">⚠ Verificar</span><br><small style="color:var(--color-text-secondary)">impacto em refs T (ver tab Triagem)</small></td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div style="background:#FFF; padding:10px 14px; border-radius:6px; margin-top:12px; font-size:0.8125rem; color:var(--color-text-primary);">
+          <strong>📌 Verdict:</strong> mudança <strong>viável à primeira ordem</strong> — demandas diretas satisfeitas. <strong style="color:var(--color-orange);">⚠ Cuidado:</strong> esta análise é só 1 nível de profundidade. Os 65 m³ de retestagem L02.2 (<code>2500×95×14</code> → <code>1200×95×14</code>) <strong>assume que essas tábuas compridas não estão já comprometidas para outras refs</strong> (ex.: 1450×95×22, 1600×95×22). LP completo é o único que fecha esta cadeia sem dupla contagem. Padrão da Visão Sistémica abaixo dá a vista end-to-end correta.
+        </div>
+      </div>
+    </div>
+
+    <!-- REF 2: 1200×100×22 -->
+    <div class="panel" style="border-left:4px solid var(--color-blue);">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">1200×100×22 (P) · linha 01.1</div>
+          <div class="panel-subtitle">2.475 m³/ano produzidos · Top 2 contribuidor</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="pill pill-green">Fácil</span>
+          <span class="pill pill-blue" style="font-size:0.95rem; padding:6px 14px;"><strong>-825 ton · €70.125/ano</strong></span>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:24px; align-items:start;">
+        <div style="background:var(--color-red-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600; margin-bottom:8px;">📊 Como produzes hoje</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2500mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>211-240mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>95×14</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>54.5%</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria atual</td><td><strong>5.272 ton/ano</strong></td></tr>
+          </table>
+        </div>
+        <div style="align-self:center; font-size:2rem; color:var(--color-text-tertiary);">→</div>
+        <div style="background:var(--color-green-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-green); font-weight:600; margin-bottom:8px;">✓ Como devias produzir</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2500mm</strong> (mantém)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>211-240mm</strong> (mantém)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>90×14</strong> (era 95×14)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>67.9%</strong> (+13.4pp)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria ótima</td><td><strong>4.447 ton/ano</strong></td></tr>
+          </table>
+        </div>
+      </div>
+      <div style="background:var(--color-blue-light); padding:14px 16px; border-radius:var(--radius-sm); margin-top:8px; font-size:0.875rem;">
+        <strong style="color:var(--color-blue);">Mudança operacional:</strong> Reconfigurar costaneiro 95×14 → 90×14 nesta combinação. Implica produzir mais 90×14 (que tem demanda própria — ver cesta) e menos 95×14 (também tem demanda, mas em excesso).<br>
+        <strong style="color:var(--color-blue);">Validação nos dados:</strong> em <code>MCF data</code>, filtra Z="1200×100×22" + dia, e cruza com produção do mesmo dia na linha 03.x para identificar o costaneiro que saiu junto.
+      </div>
+    </div>
+
+    <!-- REF 3: 1000×98×22 -->
+    <div class="panel" style="border-left:4px solid var(--color-blue);">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">1000×98×22 (P) · linha 01.1</div>
+          <div class="panel-subtitle">1.239 m³/ano produzidos · Top 4 contribuidor</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="pill pill-orange">Médio</span>
+          <span class="pill pill-blue" style="font-size:0.95rem; padding:6px 14px;"><strong>-415 ton · €35.275/ano</strong></span>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:24px; align-items:start;">
+        <div style="background:var(--color-red-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600; margin-bottom:8px;">📊 Como produzes hoje</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2100mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>191-220mm</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>95×14</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>54.5%</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria atual</td><td><strong>2.639 ton/ano</strong></td></tr>
+          </table>
+        </div>
+        <div style="align-self:center; font-size:2rem; color:var(--color-text-tertiary);">→</div>
+        <div style="background:var(--color-green-light); padding:16px; border-radius:var(--radius-sm);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-green); font-weight:600; margin-bottom:8px;">✓ Como devias produzir</div>
+          <table style="font-size:0.875rem; width:100%;">
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Toro original</td><td><strong>2100mm</strong> (mantém)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Gama Ø rolaria dominante</td><td><strong>221-250mm</strong> (gama acima)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Costaneiro associado</td><td><strong>90×14</strong></td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Aproveitamento estimado</td><td><strong>67.9%</strong> (+13.4pp)</td></tr>
+            <tr><td style="color:var(--color-text-secondary); padding:4px 0;">Ton rolaria ótima</td><td><strong>2.224 ton/ano</strong></td></tr>
+          </table>
+        </div>
+      </div>
+      <div style="background:var(--color-blue-light); padding:14px 16px; border-radius:var(--radius-sm); margin-top:8px; font-size:0.875rem;">
+        <strong style="color:var(--color-blue);">Mudança operacional:</strong> Esta ref está hoje em gama 191-220mm. Folha5 sugere aumentar a gama de Ø — mas tabela de triagem 2100mm aceita até 145mm de largura na gama 221-250mm. Confirmar disponibilidade dessa gama nas compras (alavanca cruzada com tab Compra).<br>
+        <strong style="color:var(--color-blue);">Esforço médio:</strong> requer ajuste coordenado triagem + compra. Não é só mudar costaneiro.
+      </div>
+    </div>
+
+    <div style="text-align:center; padding:24px; color:var(--color-text-secondary); font-size:0.875rem;">
+      📋 +14 refs com ganho &gt;50 ton/ano · <a href="#" style="color:var(--color-blue);">ver lista completa</a>
+    </div>
+  </section>
+
+  <section class="tab-content" id="tab-dados">
+    <h2 class="section-title">Dados</h2>
+    <p class="section-subtitle">Carregar ficheiros novos para atualizar o modelo. Cada upload: validação de schema → preview → confirmar → re-calcula.</p>
+
+    <div class="mockup-note">
+      <strong>Sprint 1 — interface apenas.</strong> Ainda não há parsing nem persistência. Os ficheiros que escolheres ficam só em memória da sessão. Parsers + Supabase entram no Sprint 2.
+    </div>
+
+    <div class="upload-grid">
+      <div class="upload-card" data-source="compras">
+        <div class="upload-icon">📦</div>
+        <div class="upload-title">Compras de rolaria</div>
+        <div class="upload-meta">.xlsx · long-form · jan/2025 onwards</div>
+        <label class="upload-drop">
+          <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="upload-cta">Escolher ficheiro</span>
+          <span class="upload-hint">ou arrasta para aqui</span>
+        </label>
+        <div class="upload-status" data-status>Sem ficheiro</div>
+      </div>
+
+      <div class="upload-card" data-source="triagem">
+        <div class="upload-icon">🔍</div>
+        <div class="upload-title">Triagem (raio-X)</div>
+        <div class="upload-meta">.xlsx · distribuição de Ø reais</div>
+        <label class="upload-drop">
+          <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="upload-cta">Escolher ficheiro</span>
+          <span class="upload-hint">ou arrasta para aqui</span>
+        </label>
+        <div class="upload-status" data-status>Sem ficheiro</div>
+      </div>
+
+      <div class="upload-card" data-source="producao">
+        <div class="upload-icon">🏭</div>
+        <div class="upload-title">Produção</div>
+        <div class="upload-meta">.xlsm · output diário por linha/produto</div>
+        <label class="upload-drop">
+          <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="upload-cta">Escolher ficheiro</span>
+          <span class="upload-hint">ou arrasta para aqui</span>
+        </label>
+        <div class="upload-status" data-status>Sem ficheiro</div>
+      </div>
+
+      <div class="upload-card" data-source="planeamento">
+        <div class="upload-icon">📅</div>
+        <div class="upload-title">Planeamento</div>
+        <div class="upload-meta">.xlsm · referências planeadas (ProducaoMCF)</div>
+        <label class="upload-drop">
+          <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="upload-cta">Escolher ficheiro</span>
+          <span class="upload-hint">ou arrasta para aqui</span>
+        </label>
+        <div class="upload-status" data-status>Sem ficheiro</div>
+      </div>
+
+      <div class="upload-card" data-source="inventario">
+        <div class="upload-icon">📋</div>
+        <div class="upload-title">Inventário rolaria</div>
+        <div class="upload-meta">.xlsx · snapshots mensais</div>
+        <label class="upload-drop">
+          <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="upload-cta">Escolher ficheiro</span>
+          <span class="upload-hint">ou arrasta para aqui</span>
+        </label>
+        <div class="upload-status" data-status>Sem ficheiro</div>
+      </div>
+    </div>
+
+    <div class="upload-actions">
+      <button class="btn btn-ghost" id="resetUploads">Limpar tudo</button>
+      <button class="btn btn-primary" id="recalcBtn" disabled>Validar &amp; Re-calcular</button>
+    </div>
+  </section>
+
+  <section class="tab-content" id="tab-premissas">
+    <h2 class="section-title">Premissas & Factos</h2>
+    <p class="section-subtitle">Documento vivo — todas as regras, convenções e decisões que sustentam o modelo. Edita aqui sempre que algo mudar.</p>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">🎯 Função objetivo & valor</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Objetivo:</strong> minimizar ton de rolaria consumida mantendo a cesta de produtos a entregar inalterada.</li>
+        <li><strong>Régua de valor:</strong> 1pp de aproveitamento ≈ <strong>€85.000/ano</strong>.</li>
+        <li><strong>Rácio canónico:</strong> <strong>2.13 ton/m³</strong> (operacional, inclui secagem/defeitos). Não usar o rolling 2.044.</li>
+        <li><strong>Preço médio rolaria:</strong> 85 €/ton.</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">📊 Demanda — fonte e granularidade</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Fonte primária:</strong> <code>Planeamento.xlsm → ProducaoMCF</code>, col A = classe, col C = produto a fabricar (input modelo), col F = m³ em 4 meses.</li>
+        <li><strong>Anualização:</strong> col F × 3 = m³/ano. Total atual: ~38.055 m³ em 76 refs.</li>
+        <li><strong>Distribuição por classe:</strong> P 9.798 · B 4.254 · C 1.131 · 2ª 261 · T 324 m³/ano.</li>
+        <li><strong>Refs em falta no Planeamento:</strong> "menospreza" — o user vai refinar.</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">🏭 Classificação P/C/2ª/T/B</div>
+      <table style="width:100%; font-size:0.9rem;">
+        <tr><td style="padding:6px 12px; border-bottom:1px solid var(--color-border-soft);"><strong>P</strong> (Principal)</td><td>Linha 01.1</td></tr>
+        <tr><td style="padding:6px 12px; border-bottom:1px solid var(--color-border-soft);"><strong>C</strong> (Costaneiros)</td><td>Linha 03 — co-produto do corte 01</td></tr>
+        <tr><td style="padding:6px 12px; border-bottom:1px solid var(--color-border-soft);"><strong>2ª</strong></td><td>Linhas terminadas em .2 (1200×145×22 2ª → retestada para 1000 ou 800×145×22 consoante potencial)</td></tr>
+        <tr><td style="padding:6px 12px; border-bottom:1px solid var(--color-border-soft);"><strong>T</strong> (Tábuas compridas)</td><td>Linha 02.2 — sempre retestadas nas linhas 04/05</td></tr>
+        <tr><td style="padding:6px 12px;"><strong>B</strong> (Barrotes)</td><td>Linha 02.1 — <strong>cortados noutra fábrica</strong>, fora do âmbito de otimização</td></tr>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">🛒 Gamas de compra — 3 reais (não confundir com as 4 gamas geométricas do Folha5)</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><code>&gt;150 e &lt;250mm</code> — gama controlada</li>
+        <li><code>&gt;150mm</code> (Canter) — mistura, inclui até a "raíz" do tronco com Ø maior</li>
+        <li><code>&gt;250mm</code> — gama grande</li>
+        <li>ES e PT considerados <strong>equivalentes em preço</strong>; manter cota em ambos os países por diluição de risco.</li>
+        <li>Madeira certificada tratada igual à normal (não pesa neste exercício).</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">🔍 Triagem — restrição dura</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li>Fonte: <code>Lógica triagem atual.xlsx → Rolaria_aux</code></li>
+        <li>Mapeia (Comprimento × Gama Ø rolaria) → (Linha 01.1 / 02.2/3 / 02.1, Tábua principal Larg min-max + Esp máx, Costaneiro min-max em alguns casos).</li>
+        <li>Cobertura: 2100mm (4 gamas) · 2500mm (5 gamas, com costaneiros) · 2600mm (4 gamas)</li>
+        <li>2750mm: gamas definidas mas <strong>não produzido</strong> — ignorar.</li>
+        <li>Última atualização: 2024-03-18 (Eduardo Rocha). Confirmada como atual em 2026-05-14.</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">📐 Geometria & corte (Folha5)</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li>Motor canónico: <code>Fórmulas aproveitamento_v4.xlsx → Folha5</code></li>
+        <li>Kerf: <strong>disco 3.2mm, fita 2.5mm</strong></li>
+        <li>Cap: <strong>3 costaneiros por linha</strong> (limitação física da máquina)</li>
+        <li>12.787 combinações viáveis após filtros (valor 0.5320421 = "costaneiro não cabe", excluído)</li>
+        <li>π = 3.14 no Folha5 (a substituir por PI() na app — diferença de ~0.05%)</li>
+      </ul>
+    </div>
+
+    <div class="panel" style="border-left:4px solid var(--color-orange);">
+      <div class="panel-title" style="margin-bottom:12px;">🔄 Fluxos multi-estágio (críticos para o modelo)</div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600; margin-bottom:6px;">Retestagem (L04/L05)</div>
+        <ul style="padding-left:20px; line-height:1.7; font-size:0.9rem;">
+          <li>Origem: linha 02.2 + madeiras 2ª.</li>
+          <li>Exemplo: 1× <code>2500×78×14</code> (L02.2) → 2× <code>1200×78×14</code> (após retestagem L04/L05).</li>
+          <li>29% da cesta passa por retestagem.</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600; margin-bottom:6px;">Duplos (L02.3)</div>
+        <ul style="padding-left:20px; line-height:1.7; font-size:0.9rem;">
+          <li>Peça aberta a meio. Disco de corte = <strong>6mm</strong>.</li>
+          <li>Fórmula: <code>esp_output = (esp_input − 6) / 2</code></li>
+          <li>Exemplo: <code>1200×78×42</code> → 2× <code>1200×78×18</code></li>
+          <li>Output processado tipicamente em L03 (horas extra).</li>
+        </ul>
+      </div>
+      <div>
+        <div style="font-weight:600; margin-bottom:6px;">Retestagem 2ª qualidade</div>
+        <ul style="padding-left:20px; line-height:1.7; font-size:0.9rem;">
+          <li>Madeiras de 2ª (qualidade inferior, e.g. <code>1200×145×22</code>) são retestadas para <code>1000×145×22</code> ou <code>800×145×22</code> consoante o potencial da peça.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">⚙️ Granularidade de lote</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li>MCF produz "1 referência por dia × 2 turnos" ≈ <strong>~50 m³/dia</strong> (varia por ref).</li>
+        <li>Recomendações expressas em <strong>múltiplos de dias de produção</strong>, não m³ arbitrários.</li>
+        <li><strong>Tolerância ±10%</strong> na satisfação da demanda (stocks nunca 100% ajustados).</li>
+      </ul>
+    </div>
+
+    <div class="panel" style="border-left:4px solid var(--color-red);">
+      <div class="panel-title" style="margin-bottom:12px;">⚠️ Princípio crítico: balanço de massa nas recomendações</div>
+      <p style="line-height:1.7;">Toda recomendação deve mostrar o <strong>impacto no balanço de produção das outras referências</strong>. Se reduzo a produção de um costaneiro, tenho de explicar onde vai sair a demanda desse costaneiro que continua a existir — tipicamente via linha 02.2 retestagem, ou via outras combinações de corte na cesta.</p>
+      <p style="line-height:1.7; margin-top:12px;"><strong>Sem este balanço, a recomendação é incompleta e não-validável.</strong> Cada drill-down nas tabs Combinações / Triagem / Compra mostra obrigatoriamente esta análise.</p>
+    </div>
+
+    <div class="panel" style="border-left:4px solid var(--color-green);">
+      <div class="panel-title" style="margin-bottom:12px;">🎯 Identificação do "par real" (tábua × costaneiro) atualmente usado</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Lógica:</strong> dentro de cada (dia × turno), a tábua dominante na linha 01.1 é co-produzida com o costaneiro dominante na linha 03.1.x. Confirma com <strong>99% de fiabilidade</strong>.</li>
+        <li><strong>Threshold "dominante":</strong> ≥75% da produção da ref via essa combinação.</li>
+        <li><strong>Quando dispersão &lt; 75%:</strong> mostrar TODAS as combinações com presença ≥X% e propor a melhor para cada uma (não simplificar para uma única).</li>
+      </ul>
+    </div>
+
+    <div class="panel" style="border-left:4px solid var(--color-red);">
+      <div class="panel-title" style="margin-bottom:12px;">🚫 Regra: NUNCA usar "média Folha5" como baseline na app real</div>
+      <p style="line-height:1.7;">No mockup foi simplificação aceitável para validar o layout visual. <strong>Na app real, baseline tem de ser sempre o par REAL dominante</strong> (ou mistura real se &lt;75%) extraído do <code>MCF data</code>. Comparação: aproveitamento Folha5 do par real → aproveitamento Folha5 do melhor par possível para a mesma tábua → diferença = ganho dessa ref.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">🚫 Fora do âmbito (por agora)</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Barrotes</strong> (L02.1) — cortados noutra fábrica</li>
+        <li><strong>Refs em falta no Planeamento</strong> — user disse "menospreza" para validar o potencial</li>
+        <li><strong>Madeira comprada externamente</strong> — registado como contexto, não modelado</li>
+        <li><strong>2750mm</strong> — não produzido</li>
+        <li><strong>Distribuição real de Ø dentro de cada gama</strong> — uso ponto médio por agora; refinamento com <code>Análise triagem</code> em v2</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">📈 Status do modelo (em construção)</div>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Baseline atual:</strong> usa média Folha5 (rough proxy). A refinar com aproveitamento REAL por (cross-section × gama) extraído de <code>MCF data</code>.</li>
+        <li><strong>Ótimo:</strong> melhor combinação por ref isolada. LP completo daria valor ligeiramente inferior (restrições cruzadas).</li>
+        <li><strong>Split entre alavancas (🔪🔍📦):</strong> estimativas. Definitivo só com LP completo.</li>
+        <li><strong>Operational losses</strong> (secagem, defeitos) assumidas a escalar proporcionalmente. Provavelmente otimista.</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">📝 Histórico de premissas alteradas</div>
+      <table style="width:100%; font-size:0.875rem;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--color-border);">
+            <th style="text-align:left; padding:8px;">Data</th>
+            <th style="text-align:left; padding:8px;">O quê</th>
+            <th style="text-align:left; padding:8px;">Razão</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--color-border-soft);"><td style="padding:8px;">2026-05-14</td><td style="padding:8px;">Adicionada regra dos Duplos (L02.3)</td><td style="padding:8px;">Operacional crítico para fluxo multi-estágio</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-soft);"><td style="padding:8px;">2026-05-14</td><td style="padding:8px;">Confirmada tabela triagem 2024-03 como atual</td><td style="padding:8px;">User: "não mudou não"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-soft);"><td style="padding:8px;">2026-05-14</td><td style="padding:8px;">2750mm: ignorar</td><td style="padding:8px;">User: "não produzimos nada com isso"</td></tr>
+          <tr><td style="padding:8px;">2026-05-13</td><td style="padding:8px;">3 gamas de compra (não 4 geométricas)</td><td style="padding:8px;">Correção do user</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tab-content" id="tab-admin">
+    <h2 class="section-title">Admin</h2>
+    <p class="section-subtitle">Utilizadores, permissões e parâmetros do modelo.</p>
+    <div class="empty-state">
+      <h3>Conteúdo da tab Admin (a desenhar)</h3>
+      <ul>
+        <li>Gestão de utilizadores (Supabase Auth) e perfis (admin, edit, view)</li>
+        <li>Permissões por tab (quem vê / quem edita)</li>
+        <li><strong>Parâmetros do modelo</strong>: kerf disco/fita (3.2/2.5), cap costaneiros/linha (3), rácio rolaria→serrada (2.13)</li>
+        <li>Aliases de colunas para imports flexíveis</li>
+        <li>Logs de uploads e re-cálculos</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  function switchToTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    const btn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+    if (btn) btn.classList.add('active');
+    const content = document.getElementById('tab-' + tabName);
+    if (content) content.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchToTab(btn.dataset.tab));
+  });
+
+  // Cards do dashboard com data-nav-to navegam para a tab respetiva
+  document.querySelectorAll('[data-nav-to]').forEach(el => {
+    el.addEventListener('click', () => switchToTab(el.dataset.navTo));
+  });
+
+  // ===== Upload UI (tab Dados) =====
+  const uploads = {};
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    return (n/(1024*1024)).toFixed(1) + ' MB';
+  }
+  function refreshRecalc() {
+    const btn = document.getElementById('recalcBtn');
+    if (!btn) return;
+    const n = Object.keys(uploads).length;
+    btn.disabled = n === 0;
+    btn.textContent = n === 0
+      ? 'Validar & Re-calcular'
+      : 'Validar & Re-calcular (' + n + ' ficheiro' + (n>1?'s':'') + ')';
+  }
+  function setStatus(card, file) {
+    const el = card.querySelector('[data-status]');
+    if (!el) return;
+    if (file) {
+      el.innerHTML = '<span class="pill pill-green">✓</span> ' + file.name + ' · ' + fmtBytes(file.size);
+      card.classList.add('has-file');
+    } else {
+      el.textContent = 'Sem ficheiro';
+      card.classList.remove('has-file');
+    }
+  }
+  document.querySelectorAll('.upload-card').forEach(card => {
+    const drop = card.querySelector('.upload-drop');
+    const input = card.querySelector('input[type=file]');
+    input.addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      uploads[card.dataset.source] = f;
+      setStatus(card, f);
+      refreshRecalc();
+    });
+    ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.add('drag-over');
+    }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.remove('drag-over');
+    }));
+    drop.addEventListener('drop', e => {
+      const f = e.dataTransfer && e.dataTransfer.files[0];
+      if (!f) return;
+      uploads[card.dataset.source] = f;
+      setStatus(card, f);
+      refreshRecalc();
+    });
+  });
+  const resetBtn = document.getElementById('resetUploads');
+  if (resetBtn) resetBtn.addEventListener('click', () => {
+    Object.keys(uploads).forEach(k => delete uploads[k]);
+    document.querySelectorAll('.upload-card').forEach(c => {
+      const i = c.querySelector('input[type=file]');
+      if (i) i.value = '';
+      setStatus(c, null);
+    });
+    refreshRecalc();
+  });
+  const recalcBtn = document.getElementById('recalcBtn');
+  if (recalcBtn) recalcBtn.addEventListener('click', () => {
+    const names = Object.entries(uploads).map(([k,f]) => '• ' + k + ': ' + f.name).join('\n');
+    alert('Ficheiros carregados (Sprint 1 — apenas em memória):\n\n' + names + '\n\nParsing real entra no Sprint 2.');
+  });
+</script>
+
+</body>
+</html>

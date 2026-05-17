@@ -1,0 +1,217 @@
+/* ===================================
+   App Otimização MCF — Design tokens (Apple-style)
+   =================================== */
+
+:root {
+  --color-white: #FFFFFF;
+  --color-background: #F5F5F7;
+  --color-text-primary: #1D1D1F;
+  --color-text-secondary: #86868B;
+  --color-text-tertiary: #B0B0B5;
+  --color-blue: #007AFF;
+  --color-blue-dark: #0051D5;
+  --color-blue-light: rgba(0, 122, 255, 0.08);
+  --color-green: #34C759;
+  --color-green-light: rgba(52, 199, 89, 0.12);
+  --color-orange: #FF9500;
+  --color-orange-light: rgba(255, 149, 0, 0.12);
+  --color-red: #FF3B30;
+  --color-red-light: rgba(255, 59, 48, 0.12);
+  --color-border: #D2D2D7;
+  --color-border-soft: #E5E5EA;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font);
+  color: var(--color-text-primary);
+  background: var(--color-background);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Header */
+.app-header {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky; top: 0; z-index: 100;
+}
+.header-content {
+  max-width: 1400px; margin: 0 auto;
+  padding: 16px 32px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.app-title {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 1.25rem; font-weight: 600;
+}
+.app-title .logo {
+  width: 32px; height: 32px;
+  background: var(--color-blue);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-weight: 700; font-size: 0.85rem;
+}
+.header-meta {
+  display: flex; align-items: center; gap: 16px;
+  color: var(--color-text-secondary); font-size: 0.875rem;
+}
+.user-pill {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--color-background);
+  border-radius: 999px; font-weight: 500;
+}
+.user-pill .avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: linear-gradient(135deg, #007AFF, #34C759);
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 0.7rem; font-weight: 700;
+}
+
+/* Tabs */
+.tab-nav {
+  max-width: 1400px; margin: 0 auto;
+  padding: 16px 32px 0;
+  display: flex; gap: 4px; overflow-x: auto;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+.tab-btn {
+  padding: 10px 16px;
+  background: transparent; border: none;
+  color: var(--color-text-secondary);
+  font-family: inherit; font-size: 0.9rem; font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.tab-btn:hover { color: var(--color-text-primary); background: var(--color-blue-light); }
+.tab-btn.active {
+  color: var(--color-blue);
+  border-bottom-color: var(--color-blue);
+}
+
+/* Layout */
+main {
+  max-width: 1400px; margin: 0 auto;
+  padding: 32px;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.section-title {
+  font-size: 1.5rem; font-weight: 600; margin-bottom: 8px;
+}
+.section-subtitle {
+  color: var(--color-text-secondary); margin-bottom: 24px;
+}
+
+/* Panel */
+.panel {
+  background: var(--color-white);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border-soft);
+}
+.panel-header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 16px;
+}
+.panel-title {
+  font-size: 1.0625rem; font-weight: 600;
+}
+.panel-subtitle {
+  font-size: 0.8125rem; color: var(--color-text-secondary);
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px; border: none;
+  font-family: inherit; font-size: 0.875rem; font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-primary { background: var(--color-blue); color: white; }
+.btn-primary:hover { background: var(--color-blue-dark); }
+.btn-ghost { background: var(--color-background); color: var(--color-text-primary); }
+.btn-ghost:hover { background: var(--color-border-soft); }
+
+/* Pills */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600;
+}
+.pill-green { background: var(--color-green-light); color: var(--color-green); }
+.pill-orange { background: var(--color-orange-light); color: var(--color-orange); }
+.pill-red { background: var(--color-red-light); color: var(--color-red); }
+.pill-blue { background: var(--color-blue-light); color: var(--color-blue); }
+.pill-grey { background: var(--color-background); color: var(--color-text-secondary); }
+
+/* Table */
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+table.data th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--color-border-soft);
+  background: var(--color-background);
+}
+table.data th.num, table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+/* Empty / placeholder */
+.empty-state {
+  padding: 80px 40px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  background: var(--color-white);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--color-border);
+}
+.empty-state h3 { color: var(--color-text-primary); margin-bottom: 8px; font-size: 1.0625rem; }
+
+/* Status banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  margin-bottom: 24px;
+}
+.banner-info {
+  background: var(--color-blue-light);
+  color: var(--color-blue-dark);
+  border: 1px solid rgba(0, 122, 255, 0.2);
+}
+.banner-warn {
+  background: #FFF9E6;
+  border: 1px solid #F0D67A;
+  color: #856300;
+}
