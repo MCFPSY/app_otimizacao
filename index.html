@@ -2711,11 +2711,13 @@
 
   function gamaToD(gama) {
     if (!gama) return null;
-    let m = gama.match(/(\d+)\s*-\s*(\d+)\s*mm?$/i) || gama.match(/-\s*(\d+)\s*-\s*(\d+)/);
+    const s = String(gama);
+    // Suporta "NUM a NUM" (formato real dos dados), "NUM-NUM", "NUM até NUM"
+    let m = s.match(/(\d+)\s*(?:a|-|até|to|–|—)\s*(\d+)\s*mm/i);
     if (m) return (+m[1] + +m[2]) / 2;
-    m = gama.match(/<\s*(\d+)/);
+    m = s.match(/<\s*(\d+)/);
     if (m) return Math.max(120, +m[1] - 10);
-    m = gama.match(/>\s*(\d+)/);
+    m = s.match(/>\s*(\d+)/);
     if (m) return +m[1] + 15;
     return null;
   }
