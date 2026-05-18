@@ -477,6 +477,29 @@
     color: #C7FFD8 !important;
   }
 
+  /* ===== Motor settings inputs ===== */
+  .motor-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    font-family: inherit;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    background: var(--color-white);
+    color: var(--color-text-primary);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .motor-input:focus {
+    outline: none;
+    border-color: var(--color-blue);
+    box-shadow: 0 0 0 3px var(--color-blue-light);
+  }
+  .motor-input.dirty {
+    border-color: var(--color-orange);
+    background: rgba(255, 149, 0, 0.04);
+  }
+
   /* ===== Login modal (Marco 2) ===== */
   .auth-overlay {
     position: fixed; inset: 0;
@@ -686,6 +709,7 @@
     <button class="tab-btn" data-tab="combinacoes">Combinações</button>
     <button class="tab-btn" data-tab="dados">Dados</button>
     <button class="tab-btn" data-tab="premissas">Premissas</button>
+    <button class="tab-btn" data-tab="motor">Motor</button>
     <button class="tab-btn" data-tab="admin">Admin</button>
   </nav>
 </header>
@@ -1697,6 +1721,80 @@
     </div>
   </section>
 
+  <!-- ============== MOTOR (Marco 5: parâmetros editáveis do motor de cálculo) ============== -->
+  <section class="tab-content" id="tab-motor">
+    <h2 class="section-title">Motor de cálculo · Folha5</h2>
+    <p class="section-subtitle">Parâmetros que definem como a app calcula aproveitamento. <strong>Editáveis</strong> — qualquer alteração re-executa os cálculos em toda a app. Estes valores substituem a folha <code>Folha5</code> do Excel original como fonte canónica.</p>
+
+    <div id="motorStatus" class="banner banner-info" style="display:none;"></div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">⚙️ Parâmetros do motor</div>
+          <div class="panel-subtitle">Última actualização: <span id="motorUpdatedAt">—</span></div>
+        </div>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="motorReset">Repor canónicos</button>
+          <button class="btn btn-primary" id="motorSave" disabled>Guardar alterações</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top:16px;">
+        <div>
+          <label class="slider-label" for="paramKerfDisco">Kerf disco (mm)</label>
+          <input type="number" id="paramKerfDisco" step="0.1" min="0" max="20" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Espessura do corte do disco principal. Canónico: <strong>3.2</strong>.</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramKerfFita">Kerf fita (mm)</label>
+          <input type="number" id="paramKerfFita" step="0.1" min="0" max="20" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Espessura do corte da serra fita (multi-blade). Canónico: <strong>2.5</strong>.</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramCap">Cap costaneiros / linha</label>
+          <input type="number" id="paramCap" step="1" min="1" max="10" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Limitação física da máquina — nº máximo de costaneiros por corte. Canónico: <strong>3</strong>.</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramPi">π (pi)</label>
+          <input type="number" id="paramPi" step="0.000001" min="3.14" max="3.15" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Folha5 usa <strong>3.14</strong>; valor exacto = 3.141593 (diferença ~0.05%).</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramRatio">Rácio ton/m³</label>
+          <input type="number" id="paramRatio" step="0.001" min="1" max="4" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Densidade operacional rolaria→serrada. Canónico: <strong>2.130</strong>.</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramPreco">Preço médio rolaria (€/ton)</label>
+          <input type="number" id="paramPreco" step="0.5" min="0" max="500" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Para converter ton poupadas em €. Canónico: <strong>85</strong>.</div>
+        </div>
+      </div>
+
+      <div style="margin-top:24px;">
+        <label class="slider-label" for="paramNotes">Notas (opcional)</label>
+        <textarea id="paramNotes" rows="2" style="width:100%; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--color-border); font-family:inherit; font-size:0.9rem; resize:vertical;" placeholder="Razão das alterações, ex.: 'kerf disco aumentado após troca de máquina em mai/26'"></textarea>
+      </div>
+    </div>
+
+    <div class="panel panel-accent-orange" style="border-left:4px solid var(--color-orange);">
+      <div class="panel-title">🚧 Algoritmo geométrico — em desenvolvimento</div>
+      <p>Os parâmetros acima já são guardados e usados onde aplicável (ex.: <code>preço €/ton</code> e <code>rácio ton/m³</code> em conversões). O <strong>algoritmo de packing</strong> (calcular aproveitamento para qualquer tábua × costaneiro × Ø rolaria via JS, substituindo o lookup de Folha5) está em desenvolvimento na próxima sessão. Quando estiver pronto, qualquer alteração aqui re-calcula automaticamente Dashboard, Combinações, Compra e Triagem.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">📚 Como o Excel funciona (referência)</div>
+      <ul class="bullet-list">
+        <li><strong>Folha5</strong>: 3851 × 335 cols. Cada bloco de 8 linhas = (tábua principal × gama Ø × Ø específico). Dentro do bloco, ~28 combinações lado-a-lado, cada uma com 12 cols (TOP/BOTTOM + RIGHT/LEFT + MIDDLE segments + % Desperdício). ~12.787 viáveis após filtros.</li>
+        <li><strong>Folha3</strong>: contém as etiquetas dos costaneiros (70×13, 75×18, 78×14, 90×14, 95×14, 98×18, 100×22, etc.) em L11 cols 10+.</li>
+        <li><strong>Folha2</strong>: exemplo named-inputs para a simulação geométrica.</li>
+        <li><strong>Folha1</strong>: fórmula simples de aproveitamento (1 quadrado dentro do círculo).</li>
+      </ul>
+    </div>
+  </section>
+
   <section class="tab-content" id="tab-admin">
     <h2 class="section-title">Admin</h2>
     <p class="section-subtitle">Utilizadores, permissões e parâmetros do modelo.</p>
@@ -2241,11 +2339,113 @@
     // Agora sim, carregar dados (RLS exige auth)
     const [demand, prodSummary] = await Promise.all([
       loadDemandFromDB(),
-      loadProducaoSummary()
+      loadProducaoSummary(),
+      loadEngineSettings()
     ]);
     applyDemandToDashboard(demand);
     applyProducaoToDashboard(prodSummary);
   }
+
+  // ===== Marco 5.1: Engine settings (Motor tab) =====
+  const PARAM_KEYS = {
+    paramKerfDisco: 'kerf_disco_mm',
+    paramKerfFita: 'kerf_fita_mm',
+    paramCap: 'cap_costaneiros',
+    paramPi: 'pi_value',
+    paramRatio: 'ratio_ton_m3',
+    paramPreco: 'preco_eur_ton',
+  };
+  const CANONICAL = {
+    kerf_disco_mm: 3.2, kerf_fita_mm: 2.5, cap_costaneiros: 3,
+    pi_value: 3.14, ratio_ton_m3: 2.13, preco_eur_ton: 85.00,
+  };
+  let engineSettings = null;
+
+  function setMotorStatus(kind, msg) {
+    const el = document.getElementById('motorStatus');
+    if (!el) return;
+    el.className = 'banner banner-' + kind;
+    el.innerHTML = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  async function loadEngineSettings() {
+    const { data, error } = await sb.from('engine_settings').select('*').eq('id', 1).single();
+    if (error) {
+      console.error('loadEngineSettings:', error);
+      setMotorStatus('warn', '<strong>Erro a carregar settings:</strong> ' + error.message);
+      return null;
+    }
+    engineSettings = data;
+    applyEngineSettingsToForm(data);
+    return data;
+  }
+
+  function applyEngineSettingsToForm(s) {
+    if (!s) return;
+    for (const [inputId, dbKey] of Object.entries(PARAM_KEYS)) {
+      const el = document.getElementById(inputId);
+      if (el && s[dbKey] != null) el.value = Number(s[dbKey]);
+    }
+    document.getElementById('paramNotes').value = s.notes || '';
+    document.getElementById('motorUpdatedAt').textContent = s.updated_at ? fmtPtDate(s.updated_at) + (s.updated_by ? ' por ' + s.updated_by : '') : '—';
+    document.querySelectorAll('.motor-input').forEach(i => i.classList.remove('dirty'));
+    document.getElementById('motorSave').disabled = true;
+  }
+
+  function checkMotorDirty() {
+    if (!engineSettings) return false;
+    let anyDirty = false;
+    for (const [inputId, dbKey] of Object.entries(PARAM_KEYS)) {
+      const el = document.getElementById(inputId);
+      if (!el) continue;
+      const newVal = Number(el.value);
+      const oldVal = Number(engineSettings[dbKey]);
+      const dirty = !isNaN(newVal) && Math.abs(newVal - oldVal) > 1e-9;
+      el.classList.toggle('dirty', dirty);
+      if (dirty) anyDirty = true;
+    }
+    if ((document.getElementById('paramNotes').value || '') !== (engineSettings.notes || '')) anyDirty = true;
+    document.getElementById('motorSave').disabled = !anyDirty;
+    return anyDirty;
+  }
+
+  async function saveEngineSettings() {
+    const payload = { id: 1, updated_at: new Date().toISOString() };
+    for (const [inputId, dbKey] of Object.entries(PARAM_KEYS)) {
+      payload[dbKey] = Number(document.getElementById(inputId).value);
+    }
+    payload.notes = document.getElementById('paramNotes').value || null;
+    const session = (await sb.auth.getSession()).data.session;
+    if (session?.user?.email) payload.updated_by = session.user.email;
+    const { data, error } = await sb.from('engine_settings').upsert(payload).select().single();
+    if (error) {
+      setMotorStatus('error', '<strong>Falha a guardar:</strong> ' + error.message);
+      return;
+    }
+    engineSettings = data;
+    applyEngineSettingsToForm(data);
+    setMotorStatus('info', '<strong>✓ Settings guardados.</strong> Recalculos automáticos serão accionados quando o algoritmo geométrico estiver pronto (próxima iteração).');
+    setTimeout(() => setMotorStatus('info', ''), 5000);
+  }
+
+  function resetEngineToCanonical() {
+    for (const [inputId, dbKey] of Object.entries(PARAM_KEYS)) {
+      const el = document.getElementById(inputId);
+      if (el) el.value = CANONICAL[dbKey];
+    }
+    checkMotorDirty();
+  }
+
+  // Wire UI
+  ['paramKerfDisco','paramKerfFita','paramCap','paramPi','paramRatio','paramPreco','paramNotes'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', checkMotorDirty);
+  });
+  const motorSaveBtn = document.getElementById('motorSave');
+  if (motorSaveBtn) motorSaveBtn.addEventListener('click', saveEngineSettings);
+  const motorResetBtn = document.getElementById('motorReset');
+  if (motorResetBtn) motorResetBtn.addEventListener('click', resetEngineToCanonical);
 
   function onUnauthenticated() {
     document.body.classList.add('is-authenticating');
