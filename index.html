@@ -2995,54 +2995,69 @@
       if (asR.error) continue;
       const asAprov = asR.aproveitamento;
 
-      // Iterar candidatos, pontuar por aproveitamento, MAS marcar viabilidade de demanda
+      // Avaliar todos os candidatos elegíveis (mesmo comprimento)
       const candEvals = [];
       for (const c of candidatos.values()) {
         if (c.length !== tabLength) continue;
         const r = calcAproveitamento(D, tab.W, tab.H, c.W, c.H, kerf_d, kerf_f, cap, piVal);
         if (r.error) continue;
-        // Volume de costaneiro produzido se aplicarmos esta recomendação:
-        // vol_cost = vol_tabua × N × areaCost / areaMain
         const coRatio = coProductionRatio(r.n.total, c.W * c.H, tab.W * tab.H);
-        const vol_cost_produced = p.ton_total * coRatio;  // assumindo ton_total e m³_ano em mesma unidade
-        const demand_cost = demandMap.get(c.name) || 0;
-        // Demanda actualmente coberta pela própria ref noutras combinações:
-        // simplificação v1 — assumimos que o costaneiro NOVO substitui parte da demanda existente
-        // mas se vol_cost_produced > demand, o excesso é desperdício
-        const demand_ratio = demand_cost > 0 ? vol_cost_produced / demand_cost : Infinity;
-        let viability;
-        if (demand_cost === 0) viability = 'sem_demanda';     // costaneiro sem demanda — desperdício total
-        else if (demand_ratio <= 1.0) viability = 'viavel';   // produz <= demanda → OK
-        else if (demand_ratio <= 1.5) viability = 'excesso';  // até 50% acima
-        else viability = 'inviavel';                          // muito acima da demanda
-
+        const demand = demandMap.get(c.name) || 0;
+        const maxTforC = coRatio > 0 && demand > 0 ? demand / coRatio : 0;  // máx vol de tábua que esta combinação suporta
         candEvals.push({
-          name: c.name, W: c.W, H: c.H, aprov: r.aproveitamento,
-          vol_produced: vol_cost_produced, demand: demand_cost, demand_ratio, viability,
+          name: c.name, W: c.W, H: c.H,
+          aprov: r.aproveitamento, coRatio, demand,
+          max_t_for_c: maxTforC,
         });
       }
+      // Ordenar por aproveitamento descendente (greedy)
+      candEvals.sort((a, b) => b.aprov - a.aprov);
 
-      // Seleccionar BEST: primeiro entre viáveis, fallback para excesso, etc.
-      // Dentro do mesmo bucket, maior aprov vence.
-      const order = { viavel: 0, excesso: 1, sem_demanda: 2, inviavel: 3 };
-      candEvals.sort((a, b) => {
-        const o = order[a.viability] - order[b.viability];
-        if (o !== 0) return o;
-        return b.aprov - a.aprov;
-      });
+      // Alocação greedy: tenta encher cada candidato até ao seu limite de demanda
+      let remaining = p.ton_total;
+      const allocs = [];
+      for (const c of candEvals) {
+        if (remaining <= 0.01) break;
+        if (c.demand <= 0) continue;  // skip sem demanda nesta passada
+        const alloc = Math.min(remaining, c.max_t_for_c);
+        if (alloc < 0.01) continue;
+        allocs.push({
+          name: c.name, aprov: c.aprov, alloc, share: alloc / p.ton_total,
+          demand: c.demand, produced: alloc * c.coRatio, source: 'demand_match',
+        });
+        remaining -= alloc;
+      }
+      // Se sobrou produção sem destino com demanda, aloca ao melhor restante (mesmo sem demanda)
+      if (remaining > 0.01) {
+        for (const c of candEvals) {
+          if (remaining <= 0.01) break;
+          if (allocs.find(a => a.name === c.name)) continue;
+          // Candidato sem demanda OU já maxed out — usa-se na mesma para o resto
+          allocs.push({
+            name: c.name, aprov: c.aprov, alloc: remaining, share: remaining / p.ton_total,
+            demand: c.demand, produced: remaining * c.coRatio, source: 'excess',
+          });
+          remaining = 0;
+          break;
+        }
+      }
+      if (allocs.length === 0) continue;  // segurança
 
-      const best = candEvals[0] || null;
-      // Avaliar o costaneiro ACTUAL também para o seu próprio viability
+      // Aproveitamento ponderado pela alocação
+      const weightedAprov = allocs.reduce((s, a) => s + a.alloc * a.aprov, 0) / p.ton_total;
+      const deltaApr = weightedAprov - asAprov;
+      const ganhoTon = deltaApr > 0 ? p.ton_total * ratio * deltaApr / weightedAprov : 0;
+      const ganhoEur = ganhoTon * preco;
+
+      // Avaliar o status do par actual
       const curCoRatio = coProductionRatio(asR.n.total, curCost.W * curCost.H, tab.W * tab.H);
       const curVolProduced = p.ton_total * curCoRatio;
       const curDemand = demandMap.get(p.dominant_costaneiro) || 0;
       const curDemandRatio = curDemand > 0 ? curVolProduced / curDemand : Infinity;
 
-      const bestCandName = best ? best.name : p.dominant_costaneiro;
-      const bestAprov = best ? best.aprov : asAprov;
-      const deltaApr = bestAprov - asAprov;
-      const ganhoTon = p.ton_total * ratio * deltaApr / bestAprov;
-      const ganhoEur = ganhoTon * preco;
+      // is_same: o mix proposto é maioritariamente o actual?
+      const dominantAlloc = allocs[0];
+      const is_same_pair = dominantAlloc.share > 0.95 && dominantAlloc.name === p.dominant_costaneiro;
 
       recs.push({
         tabua: p.tabua,
@@ -3052,17 +3067,13 @@
         current_demand: curDemand,
         current_produced: curVolProduced,
         current_demand_ratio: curDemandRatio,
-        best_cost: bestCandName,
-        best_aprov: bestAprov,
-        best_demand: best ? best.demand : 0,
-        best_produced: best ? best.vol_produced : 0,
-        best_demand_ratio: best ? best.demand_ratio : Infinity,
-        best_viability: best ? best.viability : 'inviavel',
+        allocations: allocs,
+        weighted_aprov: weightedAprov,
         delta_aprov: deltaApr,
         ton_total: p.ton_total,
         ganho_ton: ganhoTon,
         ganho_eur: ganhoEur,
-        is_same_pair: bestCandName === p.dominant_costaneiro,
+        is_same_pair,
       });
     }
     recs.sort((a, b) => b.ganho_eur - a.ganho_eur);
@@ -3085,59 +3096,65 @@
       if (totalEl) totalEl.textContent = '—';
       return;
     }
-    // Total só conta recomendações VIÁVEIS (que não estouram demanda)
     const recsComMudanca = recs.filter(r => !r.is_same_pair);
-    const recsViaveis = recsComMudanca.filter(r => r.best_viability === 'viavel');
-    const totalGanhoTon = recsViaveis.reduce((s, r) => s + r.ganho_ton, 0);
-    const totalGanhoEur = recsViaveis.reduce((s, r) => s + r.ganho_eur, 0);
-    if (totalEl) totalEl.innerHTML = `Total viável: <strong>${fmtNum(totalGanhoTon)} ton/ano · €${fmtNum(totalGanhoEur)}/ano</strong>`;
+    const totalGanhoTon = recsComMudanca.reduce((s, r) => s + r.ganho_ton, 0);
+    const totalGanhoEur = recsComMudanca.reduce((s, r) => s + r.ganho_eur, 0);
+    if (totalEl) totalEl.innerHTML = `Total: <strong>${fmtNum(totalGanhoTon)} ton/ano · €${fmtNum(totalGanhoEur)}/ano</strong>`;
 
-    const viabilityPill = (v) => {
-      if (v === 'viavel')    return '<span class="pill pill-green" style="font-size:0.65rem;">VIÁVEL</span>';
-      if (v === 'excesso')   return '<span class="pill pill-orange" style="font-size:0.65rem;">EXCESSO</span>';
-      if (v === 'sem_demanda') return '<span class="pill pill-grey" style="font-size:0.65rem;">SEM DEMANDA</span>';
-      return '<span class="pill pill-red" style="font-size:0.65rem;">INVIÁVEL</span>';
+    const fmtMix = (allocs) => {
+      return allocs.map(a => {
+        const pct = (a.share * 100).toFixed(0);
+        const sourceColor = a.source === 'excess' ? 'color:var(--color-orange);' : '';
+        return `<span style="${sourceColor}"><strong>${a.name}</strong> (${pct}%)</span>`;
+      }).join(' + ');
     };
-    const fmtRatio = (r) => isFinite(r) ? (r * 100).toFixed(0) + '%' : '∞';
 
     const rows = recs.slice(0, 25).map(r => {
       const deltaPct = (r.delta_aprov * 100).toFixed(1);
+      const deltaColor = r.delta_aprov > 0 ? 'delta-positive' : '';
+      const deltaSign = r.delta_aprov >= 0 ? '+' : '';
       const changeBadge = r.is_same_pair
-        ? '<span class="pill pill-grey" style="font-size:0.7rem;">Já é o melhor</span>'
-        : '<span class="pill pill-green" style="font-size:0.7rem;">Mudar para</span>';
-      const rowOpacity = r.is_same_pair ? 0.6 : (r.best_viability === 'inviavel' ? 0.7 : 1.0);
-      return `<tr style="opacity:${rowOpacity}">
-        <td><strong>${r.tabua}</strong></td>
-        <td style="font-size:0.8rem;">${r.gama || '—'}</td>
-        <td>${r.current_cost}</td>
-        <td class="num">${(r.current_aprov*100).toFixed(1)}%</td>
-        <td>${changeBadge}</td>
-        <td><strong>${r.best_cost}</strong></td>
-        <td class="num">${(r.best_aprov*100).toFixed(1)}%</td>
-        <td class="num delta-positive">+${deltaPct}pp</td>
-        <td class="num">${fmtNum(r.best_produced)}</td>
-        <td class="num">${r.best_demand ? fmtNum(r.best_demand) : '—'}</td>
-        <td class="num">${fmtRatio(r.best_demand_ratio)}</td>
-        <td>${viabilityPill(r.best_viability)}</td>
-        <td class="num delta-positive">${r.is_same_pair || r.best_viability !== 'viavel' ? '—' : fmtNum(r.ganho_ton)}</td>
-        <td class="num delta-positive">${r.is_same_pair || r.best_viability !== 'viavel' ? '—' : '€' + fmtNum(r.ganho_eur)}</td>
-      </tr>`;
-    }).join('');
+        ? '<span class="pill pill-grey" style="font-size:0.7rem;">Mantém</span>'
+        : '<span class="pill pill-green" style="font-size:0.7rem;">Mudar</span>';
 
-    const nViavel = recsComMudanca.filter(r => r.best_viability === 'viavel').length;
-    const nExcesso = recsComMudanca.filter(r => r.best_viability === 'excesso').length;
-    const nInviavel = recsComMudanca.filter(r => r.best_viability === 'inviavel').length;
-    const nSemDemanda = recsComMudanca.filter(r => r.best_viability === 'sem_demanda').length;
+      // Detalhes expandíveis: cada alocação com m³ produzido vs demanda
+      const detalhes = r.allocations.map(a => {
+        const pctDemand = a.demand > 0 ? (a.produced / a.demand * 100).toFixed(0) + '%' : '∞';
+        return `<tr style="font-size:0.78rem; background:var(--color-background);">
+          <td colspan="2"></td>
+          <td>↳ ${a.name}</td>
+          <td class="num">${(a.aprov*100).toFixed(1)}%</td>
+          <td class="num">${(a.share*100).toFixed(0)}%</td>
+          <td class="num">${fmtNum(a.alloc)}</td>
+          <td class="num">${fmtNum(a.produced)}</td>
+          <td class="num">${a.demand ? fmtNum(a.demand) : '—'}</td>
+          <td class="num" style="color:${a.source === 'excess' ? 'var(--color-orange)' : 'var(--color-text-secondary)'};">${pctDemand}</td>
+          <td>${a.source === 'excess' ? '<span class="pill pill-orange" style="font-size:0.65rem;">EXCESSO</span>' : '<span class="pill pill-green" style="font-size:0.65rem;">VIÁVEL</span>'}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <tr style="opacity:${r.is_same_pair ? 0.6 : 1.0}">
+          <td><strong>${r.tabua}</strong></td>
+          <td style="font-size:0.78rem;">${r.gama || '—'}</td>
+          <td>${r.current_cost}<br><small style="color:var(--color-text-secondary);">${(r.current_aprov*100).toFixed(1)}% aprov</small></td>
+          <td>${changeBadge}</td>
+          <td>${fmtMix(r.allocations)}<br><small style="color:var(--color-text-secondary);">aprov ponderado <strong>${(r.weighted_aprov*100).toFixed(1)}%</strong></small></td>
+          <td class="num ${deltaColor}">${deltaSign}${deltaPct}pp</td>
+          <td class="num">${fmtNum(r.ton_total)}</td>
+          <td class="num delta-positive">${r.is_same_pair ? '—' : fmtNum(r.ganho_ton)}</td>
+          <td class="num delta-positive">${r.is_same_pair ? '—' : '€' + fmtNum(r.ganho_eur)}</td>
+        </tr>
+        ${detalhes}
+      `;
+    }).join('');
 
     el.innerHTML = `
       <div style="margin-bottom:12px; font-size:0.875rem;">
-        <strong>${recsComMudanca.length}</strong> refs com costaneiro melhor candidato ·
-        <span style="color:var(--color-green); font-weight:600;">${nViavel} VIÁVEIS</span> ·
-        <span style="color:var(--color-orange); font-weight:600;">${nExcesso} excesso</span> ·
-        <span style="color:var(--color-red); font-weight:600;">${nInviavel} inviáveis</span> ·
-        <span style="color:var(--color-text-secondary);">${nSemDemanda} sem demanda</span>
+        <strong>${recsComMudanca.length}</strong> refs com mix óptimo diferente do actual ·
+        <strong>${recs.length - recsComMudanca.length}</strong> mantêm o pair actual
         <br>
-        <strong>Potencial só de VIÁVEIS: ${fmtNum(totalGanhoTon)} ton/ano ≈ €${fmtNum(totalGanhoEur)}/ano</strong>
+        <strong style="color:var(--color-green);">Potencial total: ${fmtNum(totalGanhoTon)} ton/ano ≈ €${fmtNum(totalGanhoEur)}/ano</strong>
       </div>
       <div class="table-wrap">
         <table class="data">
@@ -3145,16 +3162,11 @@
             <tr>
               <th>Tábua (P)</th>
               <th>Gama</th>
-              <th>Cost. ACTUAL</th>
-              <th class="num">Aprov</th>
+              <th>AS-IS Cost.</th>
               <th>→</th>
-              <th>Cost. ÓPTIMO</th>
-              <th class="num">Aprov</th>
-              <th class="num">Δ</th>
-              <th class="num">m³/ano cost. produzido</th>
-              <th class="num">Demanda cost.</th>
-              <th class="num">% demanda</th>
-              <th>Viabilidade</th>
+              <th>TO-BE mix de costaneiros</th>
+              <th class="num">Δ aprov</th>
+              <th class="num">Ton tábua</th>
               <th class="num">Ganho ton</th>
               <th class="num">Ganho €</th>
             </tr>
@@ -3163,8 +3175,9 @@
         </table>
       </div>
       <div class="banner banner-warn" style="margin-top:16px; font-size:0.8125rem;">
-        ⚠ <strong>Viabilidade aproximada — princípio do balanço de massa:</strong>
-        VIÁVEL = costaneiro produzido ≤ demanda no Planeamento. EXCESSO = até 50% acima. INVIÁVEL = >50% acima. SEM DEMANDA = costaneiro sem demanda no Planeamento (desperdício). <strong>Limitações:</strong> esta análise é por-ref isolada, não fecha o LP completo (não considera que se reduzir um costaneiro, outras combinações também são afectadas). Algoritmo v1 ainda sub-estima aprov absolutos ~5-15pp.
+        ⚠ <strong>Algoritmo greedy per-tábua com mix proporcional</strong> (Marco 5.4 v3):
+        Para cada tábua, aloca o costaneiro com melhor aproveitamento até esgotar a sua demanda, depois passa ao 2º melhor, e por aí fora. Cada linha mostra o mix proposto: "X% com costaneiro A + Y% com B + ...". Linhas <strong style="color:var(--color-orange);">cor-de-laranja</strong> são alocações de excesso (costaneiro sem demanda restante, alocado em último recurso).
+        <br><strong>Limitação:</strong> análise per-tábua isolada — múltiplas tábuas competem pelo mesmo costaneiro e o algoritmo conta a demanda em duplicado. LP completo resolveria. Algoritmo geométrico v1 ainda sub-estima ~5-15pp absolutos vs. Folha5.
       </div>
     `;
 
