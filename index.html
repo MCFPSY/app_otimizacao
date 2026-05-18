@@ -1269,6 +1269,18 @@
     <h2 class="section-title">Combinações</h2>
     <p class="section-subtitle">Output #1 do modelo: para cada referência produzida, o corte concreto recomendado.</p>
 
+    <!-- Marco 5.4: Recomendações TO-BE (algoritmo v1) -->
+    <div class="panel panel-accent-blue" id="toBePanel" style="border-left:4px solid var(--color-blue);">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">💡 Recomendações TO-BE — melhor costaneiro alternativo</div>
+          <div class="panel-subtitle">Para cada par actual (AS-IS), o algoritmo v1 testa os candidatos e propõe o costaneiro com melhor aproveitamento para a mesma tábua + gama Ø. <strong>Ganho potencial calculado a partir dos teus dados reais.</strong> Ordenado por €/ano.</div>
+        </div>
+        <span class="pill pill-blue" id="toBeTotal">—</span>
+      </div>
+      <div id="toBeContent" style="margin-top:8px;">A calcular...</div>
+    </div>
+
     <!-- Marco 5.3: Pares reais detectados a partir da produção -->
     <div class="panel panel-accent-green" id="paresReaisPanel">
       <div class="panel-header">
@@ -2906,12 +2918,170 @@
   }
 
   let cachedProducaoRows = null;
+  let lastDetectedPairs = null;
+
   async function refreshParesReais() {
     if (!cachedProducaoRows) cachedProducaoRows = await loadAllProducaoForPares();
     const periodEl = document.getElementById('paresPeriod');
     const period = periodEl ? periodEl.value : '2025';
     const { pairs, nTurnos, nDescartados } = detectParesReais(cachedProducaoRows, period);
+    lastDetectedPairs = pairs;
     renderParesReais(pairs, nTurnos, nDescartados);
+    // Marco 5.4: TO-BE depois do AS-IS
+    renderToBe(pairs);
+  }
+
+  // ===== Marco 5.4: TO-BE — recomendações de melhor costaneiro =====
+  function computeToBe(pairs) {
+    if (!engineSettings) return [];
+    const cap = Number(engineSettings.cap_costaneiros);
+    const kerf_d = Number(engineSettings.kerf_disco_mm);
+    const kerf_f = Number(engineSettings.kerf_fita_mm);
+    const piVal = Number(engineSettings.pi_value);
+    const ratio = Number(engineSettings.ratio_ton_m3);  // 2.13 ton rolaria / ton serrada
+    const preco = Number(engineSettings.preco_eur_ton);
+
+    // Conjunto de candidatos = todos os costaneiros que aparecem nos pares (dominante + alternativas)
+    // Isto reflecte as opções operacionalmente conhecidas
+    const candidatos = new Map();  // dim_key (WxH) → name
+    for (const p of pairs) {
+      [p.dominant_costaneiro, ...p.alternatives.map(a => a.costaneiro)].forEach(c => {
+        const d = parseRefDim(c);
+        if (!d || !d.W || !d.H) return;
+        const key = `${d.W}x${d.H}`;
+        if (!candidatos.has(key)) candidatos.set(key, { name: c, W: d.W, H: d.H });
+      });
+    }
+
+    const recs = [];
+    for (const p of pairs) {
+      const tab = parseRefDim(p.tabua);
+      const D = gamaToD(p.gama_dominante);
+      const curCost = parseRefDim(p.dominant_costaneiro);
+      if (!tab || !D || !curCost || !tab.W || !tab.H || !curCost.W || !curCost.H) continue;
+
+      const asR = calcAproveitamento(D, tab.W, tab.H, curCost.W, curCost.H, kerf_d, kerf_f, cap, piVal);
+      if (asR.error) continue;
+      const asAprov = asR.aproveitamento;
+
+      let bestR = asR, bestCandName = p.dominant_costaneiro;
+      for (const c of candidatos.values()) {
+        const r = calcAproveitamento(D, tab.W, tab.H, c.W, c.H, kerf_d, kerf_f, cap, piVal);
+        if (r.error) continue;
+        if (r.aproveitamento > bestR.aproveitamento + 0.001) {  // threshold 0.1pp
+          bestR = r;
+          bestCandName = c.name;
+        }
+      }
+
+      const deltaApr = bestR.aproveitamento - asAprov;
+      // Ganho: rolaria_actual = T × ratio. Se aprov sobe de A para B, nova rolaria = T × ratio × A/B
+      // Savings = T × ratio × (B - A) / B
+      const ganhoTon = p.ton_total * ratio * deltaApr / bestR.aproveitamento;
+      const ganhoEur = ganhoTon * preco;
+
+      recs.push({
+        tabua: p.tabua,
+        gama: p.gama_dominante,
+        current_cost: p.dominant_costaneiro,
+        current_aprov: asAprov,
+        best_cost: bestCandName,
+        best_aprov: bestR.aproveitamento,
+        delta_aprov: deltaApr,
+        ton_total: p.ton_total,
+        ganho_ton: ganhoTon,
+        ganho_eur: ganhoEur,
+        is_same_pair: bestCandName === p.dominant_costaneiro,
+      });
+    }
+    recs.sort((a, b) => b.ganho_eur - a.ganho_eur);
+    return recs;
+  }
+
+  function renderToBe(pairs) {
+    const el = document.getElementById('toBeContent');
+    const totalEl = document.getElementById('toBeTotal');
+    if (!el) return;
+    if (!pairs || pairs.length === 0) {
+      el.innerHTML = '<div class="empty-state" style="padding:24px;"><p>Aguarda detecção de pares reais.</p></div>';
+      if (totalEl) totalEl.textContent = '—';
+      return;
+    }
+    const recs = computeToBe(pairs);
+    if (recs.length === 0) {
+      el.innerHTML = '<div class="empty-state" style="padding:24px;"><p>Algoritmo não conseguiu calcular para nenhum par (gamas Ø inválidas?).</p></div>';
+      if (totalEl) totalEl.textContent = '—';
+      return;
+    }
+    const recsComMudanca = recs.filter(r => !r.is_same_pair);
+    const totalGanhoTon = recsComMudanca.reduce((s, r) => s + r.ganho_ton, 0);
+    const totalGanhoEur = recsComMudanca.reduce((s, r) => s + r.ganho_eur, 0);
+    if (totalEl) totalEl.innerHTML = `Total: <strong>${fmtNum(totalGanhoTon)} ton/ano · €${fmtNum(totalGanhoEur)}/ano</strong>`;
+
+    const rows = recs.slice(0, 20).map(r => {
+      const deltaPct = (r.delta_aprov * 100).toFixed(1);
+      const changeBadge = r.is_same_pair
+        ? '<span class="pill pill-grey" style="font-size:0.7rem;">Já é o melhor</span>'
+        : '<span class="pill pill-green" style="font-size:0.7rem;">Mudar para</span>';
+      return `<tr ${r.is_same_pair ? 'style="opacity:0.6"' : ''}>
+        <td><strong>${r.tabua}</strong></td>
+        <td style="font-size:0.8rem;">${r.gama || '—'}</td>
+        <td>${r.current_cost}</td>
+        <td class="num">${(r.current_aprov*100).toFixed(1)}%</td>
+        <td>${changeBadge}</td>
+        <td><strong>${r.best_cost}</strong></td>
+        <td class="num">${(r.best_aprov*100).toFixed(1)}%</td>
+        <td class="num delta-positive">+${deltaPct}pp</td>
+        <td class="num">${fmtNum(r.ton_total)}</td>
+        <td class="num delta-positive">${r.is_same_pair ? '—' : fmtNum(r.ganho_ton)}</td>
+        <td class="num delta-positive">${r.is_same_pair ? '—' : '€' + fmtNum(r.ganho_eur)}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="margin-bottom:12px; font-size:0.875rem;">
+        <strong>${recsComMudanca.length}</strong> refs têm um costaneiro melhor que o actual ·
+        <strong>${recs.length - recsComMudanca.length}</strong> já estão no óptimo ·
+        Potencial total: <strong style="color:var(--color-green)">${fmtNum(totalGanhoTon)} ton/ano ≈ €${fmtNum(totalGanhoEur)}/ano</strong>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Tábua (P)</th>
+              <th>Gama</th>
+              <th>Cost. ACTUAL</th>
+              <th class="num">Aprov</th>
+              <th>→</th>
+              <th>Cost. ÓPTIMO</th>
+              <th class="num">Aprov</th>
+              <th class="num">Δ</th>
+              <th class="num">Ton/ano (tábua)</th>
+              <th class="num">Ganho ton</th>
+              <th class="num">Ganho €</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="banner banner-warn" style="margin-top:16px; font-size:0.8125rem;">
+        ⚠ <strong>Algoritmo v1 — usar com cautela.</strong> Sub-estima absolutos em ~5-15pp vs. Folha5 real (falta MIDDLE segments). Os deltas relativos (Δ aprov) e o ranking de refs são mais fiáveis que os números absolutos. <strong>Próxima iteração:</strong> refinar algoritmo até bater no Folha5 dentro de ±2pp.
+      </div>
+    `;
+
+    // Marco 5.4: Aggregar e injectar no Dashboard
+    applyToBeToDashboard(totalGanhoTon, totalGanhoEur);
+  }
+
+  function applyToBeToDashboard(totalTon, totalEur) {
+    // Substituir o €687.000 / ano com o valor calculado
+    const heroBigNumber = document.querySelector('#tab-dashboard .hero-left .big-number');
+    const heroSubtitle = document.querySelector('#tab-dashboard .hero-left .subtitle');
+    if (heroBigNumber) heroBigNumber.innerHTML = `€${fmtNum(totalEur)} / ano <span class="real-pill" style="font-size:0.45em;">REAL · ALGORITMO v1</span>`;
+    if (heroSubtitle) heroSubtitle.innerHTML = `<strong>${fmtNum(totalTon)} ton/ano</strong> de rolaria poupada · calculado a partir dos teus pares reais e do algoritmo geométrico v1`;
+    // Ton/ano poupadas (teto)
+    const tonAnoEl = document.querySelector('#tab-dashboard .hero-right .row:nth-child(3) .value');
+    if (tonAnoEl) tonAnoEl.textContent = `${fmtNum(totalTon)} ton`;
   }
   // Re-render quando o filtro temporal muda
   setTimeout(() => {
