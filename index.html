@@ -1274,7 +1274,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">🎯 Pares reais detectados — dados reais de produção (AS-IS)</div>
-          <div class="panel-subtitle">Para cada tábua principal, soma das tons de cada costaneiro co-produzido nos turnos onde a tábua apareceu (replica metodologia pivot Excel). <strong>≥50% share = par claramente dominante.</strong></div>
+          <div class="panel-subtitle">Restringido a <strong>turnos puros</strong> (uma única tábua principal ≥80% das tons em 01.x). Para cada tábua, distribuição das tons dos costaneiros co-produzidos. <strong>≥50% share = par claramente dominante.</strong></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <select id="paresPeriod" class="motor-input" style="font-size:0.85rem; padding:6px 10px;">
@@ -2782,26 +2782,37 @@
       }
     });
 
-    // Metodologia pivot-like (corrigida): para cada turno, todas as combinações
-    // (tábua, costaneiro) do turno são consideradas; cada costaneiro contribui
-    // com a sua tonelagem total para cada tábua presente no turno.
+    // Metodologia REFINADA (v3):
+    // 1. Filtrar a TURNOS PUROS — onde uma única tábua é ≥80% das tons em 01.x
+    //    (95% dos turnos em 2025 satisfazem isto → mínima perda de dados)
+    // 2. Para esses turnos, todos os costaneiros desse turno pertencem à tábua dominante
+    // 3. Agrupar por tábua → distribuição real dos costaneiros co-produzidos
+    //
+    const PURITY_THRESHOLD = 0.80;
     const tabuaPairs = {};
-    for (const g of Object.values(groups)) {
-      const tEntries = Object.entries(g.tabuas);
+    let nPuros = 0, nDescartados = 0;
+    for (const [turnoKey, g] of Object.entries(groups)) {
+      const tEntries = Object.entries(g.tabuas).sort((a,b) => b[1] - a[1]);
       const cEntries = Object.entries(g.costaneiros);
       if (!tEntries.length || !cEntries.length) continue;
-      for (const [tabua, tabuaTon] of tEntries) {
-        if (!tabuaPairs[tabua]) tabuaPairs[tabua] = {
-          costaneiros: {}, ton_tabua: 0, gamas: {}, turnos: new Set()
-        };
-        tabuaPairs[tabua].ton_tabua += tabuaTon;
-        tabuaPairs[tabua].turnos.add(tabua + '|' + tabuaTon); // contar turnos distintos por tábua
-        for (const [costaneiro, costTon] of cEntries) {
-          tabuaPairs[tabua].costaneiros[costaneiro] = (tabuaPairs[tabua].costaneiros[costaneiro] || 0) + costTon;
-        }
-        for (const [gama, gamaTon] of Object.entries(g.gamas)) {
-          tabuaPairs[tabua].gamas[gama] = (tabuaPairs[tabua].gamas[gama] || 0) + gamaTon;
-        }
+      const totalTabuaTon = tEntries.reduce((s, [, t]) => s + t, 0);
+      const [dominantTabua, dominantTon] = tEntries[0];
+      const purity = dominantTon / totalTabuaTon;
+      if (purity < PURITY_THRESHOLD) {
+        nDescartados++;
+        continue;
+      }
+      nPuros++;
+      if (!tabuaPairs[dominantTabua]) tabuaPairs[dominantTabua] = {
+        costaneiros: {}, ton_tabua: 0, gamas: {}, turnos: 0
+      };
+      tabuaPairs[dominantTabua].ton_tabua += dominantTon;
+      tabuaPairs[dominantTabua].turnos += 1;
+      for (const [costaneiro, costTon] of cEntries) {
+        tabuaPairs[dominantTabua].costaneiros[costaneiro] = (tabuaPairs[dominantTabua].costaneiros[costaneiro] || 0) + costTon;
+      }
+      for (const [gama, gamaTon] of Object.entries(g.gamas)) {
+        tabuaPairs[dominantTabua].gamas[gama] = (tabuaPairs[dominantTabua].gamas[gama] || 0) + gamaTon;
       }
     }
 
@@ -2817,7 +2828,7 @@
         tabua,
         dominant_costaneiro: dominantCost,
         confidence: dominantTon / totalCostTon,
-        n_turnos: turnos.size,
+        n_turnos: turnos,
         ton_total: ton_tabua,
         gama_dominante: gamasSorted[0] ? gamasSorted[0][0] : null,
         alternatives: sorted.slice(1, 4).map(([c, t]) => ({ costaneiro: c, share: t / totalCostTon })),
@@ -2825,10 +2836,10 @@
       });
     }
     result.sort((a, b) => b.ton_total - a.ton_total);
-    return { pairs: result, nTurnos: Object.keys(groups).length };
+    return { pairs: result, nTurnos: nPuros, nDescartados };
   }
 
-  function renderParesReais(pairs, nTurnos) {
+  function renderParesReais(pairs, nTurnos, nDescartados) {
     const el = document.getElementById('paresReaisContent');
     const countEl = document.getElementById('paresReaisCount');
     if (!el) return;
@@ -2837,7 +2848,7 @@
       if (countEl) countEl.textContent = '—';
       return;
     }
-    if (countEl) countEl.textContent = `${pairs.length} tábuas · ${nTurnos} turnos no período`;
+    if (countEl) countEl.textContent = `${pairs.length} tábuas · ${nTurnos} turnos puros · ${nDescartados || 0} mistos descartados`;
     // Pre-load engine settings for calc
     const cap = engineSettings ? Number(engineSettings.cap_costaneiros) : 3;
     const kerf_d = engineSettings ? Number(engineSettings.kerf_disco_mm) : 3.2;
@@ -2900,8 +2911,8 @@
     if (!cachedProducaoRows) cachedProducaoRows = await loadAllProducaoForPares();
     const periodEl = document.getElementById('paresPeriod');
     const period = periodEl ? periodEl.value : '2025';
-    const { pairs, nTurnos } = detectParesReais(cachedProducaoRows, period);
-    renderParesReais(pairs, nTurnos);
+    const { pairs, nTurnos, nDescartados } = detectParesReais(cachedProducaoRows, period);
+    renderParesReais(pairs, nTurnos, nDescartados);
   }
   // Re-render quando o filtro temporal muda
   setTimeout(() => {
