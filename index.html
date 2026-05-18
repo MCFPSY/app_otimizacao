@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MCF Otimização</title>
 <meta name="theme-color" content="#007AFF">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root {
     --color-white: #FFFFFF;
@@ -434,6 +436,147 @@
     margin-bottom: 24px;
   }
 
+  /* ===== Banner de status (Marco 1+: data-driven status) ===== */
+  .banner {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    margin-bottom: 24px;
+    border: 1px solid transparent;
+  }
+  .banner-info {
+    background: rgba(52, 199, 89, 0.10);
+    color: #1a6e2a;
+    border-color: rgba(52, 199, 89, 0.35);
+  }
+  .banner-warn {
+    background: #FFF9E6;
+    color: #856300;
+    border-color: #F0D67A;
+  }
+  .banner-error {
+    background: var(--color-red-light);
+    color: #8b1a13;
+    border-color: rgba(255, 59, 48, 0.35);
+  }
+
+  /* ===== Real-data emphasis ===== */
+  .real-pill {
+    display: inline-block;
+    background: rgba(52, 199, 89, 0.20);
+    color: var(--color-green);
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    margin-left: 6px;
+    vertical-align: middle;
+    letter-spacing: 0.05em;
+  }
+  .real-value {
+    color: #C7FFD8 !important;
+  }
+
+  /* ===== Login modal (Marco 2) ===== */
+  .auth-overlay {
+    position: fixed; inset: 0;
+    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .auth-card {
+    background: var(--color-white);
+    border-radius: var(--radius-lg);
+    padding: 40px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: var(--shadow-lg);
+  }
+  .auth-card h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .auth-card h1 .logo {
+    width: 36px; height: 36px;
+    background: var(--color-blue);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 0.85rem;
+  }
+  .auth-card .subtitle {
+    color: var(--color-text-secondary);
+    margin-bottom: 24px;
+    font-size: 0.9rem;
+  }
+  .auth-form { display: flex; flex-direction: column; gap: 12px; }
+  .auth-form label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: var(--color-text-secondary);
+  }
+  .auth-form input[type=email],
+  .auth-form input[type=password] {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    font-family: inherit;
+    font-size: 0.95rem;
+    background: var(--color-white);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .auth-form input:focus {
+    outline: none;
+    border-color: var(--color-blue);
+    box-shadow: 0 0 0 3px var(--color-blue-light);
+  }
+  .auth-form .btn {
+    padding: 12px;
+    font-size: 0.95rem;
+    margin-top: 8px;
+  }
+  .auth-toggle {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+  }
+  .auth-toggle a {
+    color: var(--color-blue);
+    text-decoration: none;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .auth-error {
+    background: var(--color-red-light);
+    color: #8b1a13;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    border: 1px solid rgba(255, 59, 48, 0.25);
+    display: none;
+  }
+  .auth-error.show { display: block; }
+  .logout-btn {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    margin-left: 12px;
+    transition: all 0.15s;
+  }
+  .logout-btn:hover { color: var(--color-red); border-color: var(--color-red); }
+  body.is-authenticating > header, body.is-authenticating > main { filter: blur(2px); pointer-events: none; }
+
   /* ===== Upload UI (tab Dados) ===== */
   .upload-grid {
     display: grid;
@@ -491,7 +634,33 @@
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
-<body>
+<body class="is-authenticating">
+
+<!-- ============== LOGIN MODAL (Marco 2) ============== -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <h1><div class="logo">MCF</div> <span>Otimização</span></h1>
+    <div class="subtitle" id="authSubtitle">Entra para aceder à app — auth interna MCF.</div>
+
+    <form class="auth-form" id="authForm" autocomplete="on">
+      <div>
+        <label for="authEmail">Email</label>
+        <input type="email" id="authEmail" required autocomplete="username" placeholder="goncalobarata@palsystems.pt">
+      </div>
+      <div>
+        <label for="authPassword">Password</label>
+        <input type="password" id="authPassword" required autocomplete="current-password" minlength="6" placeholder="••••••••">
+      </div>
+      <div class="auth-error" id="authError"></div>
+      <button type="submit" class="btn btn-primary" id="authSubmit">Entrar</button>
+    </form>
+
+    <div class="auth-toggle">
+      <span id="authToggleText">Ainda não tens conta?</span>
+      <a id="authToggleLink">Criar conta</a>
+    </div>
+  </div>
+</div>
 
 <header class="app-header">
   <div class="header-content">
@@ -501,10 +670,11 @@
     </div>
     <div class="header-meta">
       <span>Última atualização: 12/05/2026</span>
-      <div class="user-pill">
-        <div class="avatar">GB</div>
-        Gonçalo Barata · Admin
+      <div class="user-pill" id="userPill">
+        <div class="avatar" id="userAvatar">GB</div>
+        <span id="userName">—</span>
       </div>
+      <button class="logout-btn" id="logoutBtn">Sair</button>
     </div>
   </div>
   <nav class="tab-nav">
@@ -528,6 +698,7 @@
 
   <!-- ============== DASHBOARD ============== -->
   <section class="tab-content active" id="tab-dashboard">
+    <div id="dataStatus" class="banner banner-warn" style="display:none;"></div>
 
     <div class="hero">
       <div class="hero-left">
@@ -538,7 +709,7 @@
         </div>
       </div>
       <div class="hero-right">
-        <div class="row"><span class="label">Cesta anual (ProducaoMCF × 3)</span><span class="value">38.055 m³</span></div>
+        <div class="row"><span class="label">Cesta anual (ProducaoMCF × 3)</span><span class="value" id="kpiCestaAnual">38.055 m³</span></div>
         <div class="row"><span class="label">Porção mapeada no modelo</span><span class="value">17.889 m³</span></div>
         <div class="row"><span class="label">Ton/ano poupadas (teto)</span><span class="value">8.089 ton</span></div>
         <div class="row"><span class="label">€/ton média</span><span class="value">85 €</span></div>
@@ -1356,6 +1527,9 @@
       <button class="btn btn-ghost" id="resetUploads">Limpar tudo</button>
       <button class="btn btn-primary" id="recalcBtn" disabled>Validar &amp; Re-calcular</button>
     </div>
+
+    <!-- Preview do parser (Sprint 2 — só Planeamento por agora) -->
+    <div id="parsePreview" style="display:none; margin-top:24px;"></div>
   </section>
 
   <section class="tab-content" id="tab-premissas">
@@ -1624,8 +1798,310 @@
   const recalcBtn = document.getElementById('recalcBtn');
   if (recalcBtn) recalcBtn.addEventListener('click', () => {
     const names = Object.entries(uploads).map(([k,f]) => '• ' + k + ': ' + f.name).join('\n');
-    alert('Ficheiros carregados (Sprint 1 — apenas em memória):\n\n' + names + '\n\nParsing real entra no Sprint 2.');
+    alert('Ficheiros carregados (em memória):\n\n' + names);
   });
+
+  // ===== Sprint 2: Parser Planeamento.xlsm → ProducaoMCF =====
+  // Estrutura confirmada nos dados reais (84 linhas × 50 cols):
+  //   L1 = headers, L2 = blank, L3+ = dados
+  //   col A (idx 0) = classe (P/C/T/2ª/B)
+  //   col C (idx 2) = produto a fabricar (input modelo)
+  //   col F (idx 5) = m³ em 4 meses → × 3 para anualizar
+  const parsedData = {};
+
+  function fmtNum(n, dec = 0) {
+    return n == null || isNaN(n) ? '—' : Number(n).toLocaleString('pt-PT', {
+      minimumFractionDigits: dec, maximumFractionDigits: dec
+    });
+  }
+
+  async function parsePlaneamento(file) {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    if (!wb.SheetNames.includes('ProducaoMCF')) {
+      throw new Error("Folha 'ProducaoMCF' não encontrada. Folhas disponíveis: " + wb.SheetNames.join(', '));
+    }
+    const ws = wb.Sheets['ProducaoMCF'];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    // rows[0]=headers, rows[1]=blank, rows[2+]=dados
+    const items = [];
+    for (let i = 2; i < rows.length; i++) {
+      const r = rows[i];
+      const classe = r[0];                  // col A
+      const produto = r[2];                 // col C
+      const m3_4m  = Number(r[5]);          // col F
+      if (!classe || !produto || isNaN(m3_4m) || m3_4m <= 0) continue;
+      items.push({
+        classe: String(classe).trim(),
+        produto: String(produto).trim(),
+        m3_4meses: m3_4m,
+        m3_ano: m3_4m * 3
+      });
+    }
+    return items;
+  }
+
+  function renderPlaneamentoPreview(items) {
+    const el = document.getElementById('parsePreview');
+    if (!el) return;
+    // Agregar por classe
+    const byClasse = {};
+    items.forEach(it => {
+      if (!byClasse[it.classe]) byClasse[it.classe] = { refs: 0, m3_ano: 0 };
+      byClasse[it.classe].refs += 1;
+      byClasse[it.classe].m3_ano += it.m3_ano;
+    });
+    const totalRefs = items.length;
+    const totalM3 = items.reduce((s, it) => s + it.m3_ano, 0);
+    const top10 = [...items].sort((a, b) => b.m3_ano - a.m3_ano).slice(0, 10);
+
+    const classeRows = Object.entries(byClasse)
+      .sort((a, b) => b[1].m3_ano - a[1].m3_ano)
+      .map(([c, v]) => `<tr><td><strong>${c}</strong></td><td class="num">${v.refs}</td><td class="num">${fmtNum(v.m3_ano)}</td><td class="num">${fmtNum(v.m3_ano / totalM3 * 100, 1)}%</td></tr>`)
+      .join('');
+
+    const topRows = top10.map(it => `<tr><td><span class="pill pill-blue">${it.classe}</span></td><td>${it.produto}</td><td class="num">${fmtNum(it.m3_4meses)}</td><td class="num">${fmtNum(it.m3_ano)}</td></tr>`).join('');
+
+    el.innerHTML = `
+      <div class="panel" style="border-left:4px solid var(--color-green);">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">✓ Planeamento parseado — ${totalRefs} referências</div>
+            <div class="panel-subtitle">Demanda anualizada: <strong>${fmtNum(totalM3)} m³/ano</strong> (col F × 3) · ainda só em memória, não persistido</div>
+          </div>
+          <span class="pill pill-green">Parser OK</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1.4fr; gap:24px;">
+          <div>
+            <div style="font-weight:600; margin-bottom:8px; font-size:0.9rem;">Distribuição por classe</div>
+            <table class="data">
+              <thead><tr><th>Classe</th><th class="num">Refs</th><th class="num">m³/ano</th><th class="num">%</th></tr></thead>
+              <tbody>${classeRows}</tbody>
+            </table>
+          </div>
+          <div>
+            <div style="font-weight:600; margin-bottom:8px; font-size:0.9rem;">Top 10 refs (por m³/ano)</div>
+            <table class="data">
+              <thead><tr><th>Classe</th><th>Produto</th><th class="num">m³ (4m)</th><th class="num">m³/ano</th></tr></thead>
+              <tbody>${topRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+    el.style.display = 'block';
+  }
+
+  function showParseError(msg) {
+    const el = document.getElementById('parsePreview');
+    if (!el) return;
+    el.innerHTML = `<div class="banner banner-warn"><strong>Erro a parsear:</strong> ${msg}</div>`;
+    el.style.display = 'block';
+  }
+
+  // Hook ao upload: quando o source é "planeamento", parseia
+  async function maybeParse(card, file) {
+    if (card.dataset.source !== 'planeamento') return;
+    try {
+      const items = await parsePlaneamento(file);
+      parsedData.planeamento = items;
+      renderPlaneamentoPreview(items);
+    } catch (err) {
+      console.error('Parse planeamento falhou:', err);
+      showParseError(err.message);
+    }
+  }
+
+  // Wire ao input change e ao drop (depois do listener original)
+  document.querySelectorAll('.upload-card').forEach(card => {
+    const input = card.querySelector('input[type=file]');
+    input.addEventListener('change', e => maybeParse(card, e.target.files[0]));
+    const drop = card.querySelector('.upload-drop');
+    drop.addEventListener('drop', e => {
+      const f = e.dataTransfer && e.dataTransfer.files[0];
+      if (f) maybeParse(card, f);
+    });
+  });
+  // Reset limpa também a preview
+  const _origReset = document.getElementById('resetUploads');
+  if (_origReset) _origReset.addEventListener('click', () => {
+    Object.keys(parsedData).forEach(k => delete parsedData[k]);
+    const el = document.getElementById('parsePreview');
+    if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+  });
+
+  // ===== Marco 1: Persistência Supabase + Dashboard reactivo =====
+  // anon key é público por design (RLS controla acesso)
+  const SUPABASE_URL = 'https://oiojxrtlixvpdaptdrfl.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pb2p4cnRsaXh2cGRhcHRkcmZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMDMxMjUsImV4cCI6MjA5NDU3OTEyNX0.C2aD_c59DIoNzHeWNIyQbKHdF9rq_Qk0ZieD7mitK1w';
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function setDataStatus(kind, msg) {
+    const el = document.getElementById('dataStatus');
+    if (!el) return;
+    el.className = 'banner banner-' + (kind === 'ok' ? 'info' : 'warn');
+    el.innerHTML = msg;
+    el.style.display = 'block';
+  }
+
+  function fmtPtDate(iso) {
+    try { return new Date(iso).toLocaleString('pt-PT'); } catch { return iso; }
+  }
+
+  // Escrever para a BD: replace strategy (apaga tudo + insere novo)
+  async function savePlaneamento(items) {
+    // Apagar registos antigos (filter trivial — id sempre >= 1)
+    const { error: delErr } = await sb.from('planeamento_demanda').delete().gte('id', 0);
+    if (delErr) throw new Error('Falha a apagar antigos: ' + delErr.message);
+    const rows = items.map((it, i) => ({
+      classe: it.classe,
+      produto: it.produto,
+      m3_4meses: it.m3_4meses,
+      m3_ano: it.m3_ano,
+      source_row: i + 3  // L3+ no Excel
+    }));
+    const { error: insErr } = await sb.from('planeamento_demanda').insert(rows);
+    if (insErr) throw new Error('Falha a inserir: ' + insErr.message);
+    return rows.length;
+  }
+
+  // Ler da BD: usado ao carregar a página e após upload
+  async function loadDemandFromDB() {
+    const { data, error } = await sb
+      .from('planeamento_demanda')
+      .select('classe,produto,m3_4meses,m3_ano,uploaded_at')
+      .order('m3_ano', { ascending: false });
+    if (error) {
+      console.error('Load demand falhou:', error);
+      setDataStatus('warn', `<strong>BD inacessível:</strong> ${error.message}. A mostrar números do mockup.`);
+      return null;
+    }
+    return data;
+  }
+
+  function applyDemandToDashboard(rows) {
+    const cestaEl = document.getElementById('kpiCestaAnual');
+    if (!rows || rows.length === 0) {
+      setDataStatus('warn',
+        '<strong>⚠ A mostrar números do mockup.</strong> Carrega <code>Planeamento.xlsm</code> na tab <a href="#dados" onclick="switchToTab(\'dados\');return false;">Dados</a> para usar a tua demanda real.');
+      if (cestaEl) cestaEl.innerHTML = '38.055 m³ <span class="real-pill" style="background:rgba(255,149,0,0.25);color:#FF9500;">MOCKUP</span>';
+      return;
+    }
+    const totalM3 = rows.reduce((s, r) => s + Number(r.m3_ano), 0);
+    if (cestaEl) cestaEl.innerHTML = `<span class="real-value">${fmtNum(totalM3)} m³</span> <span class="real-pill">REAL</span>`;
+    const uploadedAt = rows[0].uploaded_at;
+    // Agregar por classe para mostrar no banner
+    const byClasse = {};
+    rows.forEach(r => { byClasse[r.classe] = (byClasse[r.classe] || 0) + Number(r.m3_ano); });
+    const classBreakdown = Object.entries(byClasse)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, v]) => `<strong>${c}</strong> ${fmtNum(v)}`)
+      .join(' · ');
+    setDataStatus('ok',
+      `<strong>✓ Dados reais carregados</strong> &nbsp;•&nbsp; ${rows.length} referências &nbsp;•&nbsp; ${fmtNum(totalM3)} m³/ano &nbsp;•&nbsp; último upload ${fmtPtDate(uploadedAt)}<br>` +
+      `<span style="opacity:0.85; font-size:0.8125rem;">Distribuição m³/ano por classe: ${classBreakdown}</span>`);
+  }
+
+  // Hook ao parser: depois de parsear Planeamento com sucesso, persiste
+  const _origParsePlaneamento = parsePlaneamento;
+  parsePlaneamento = async function(file) {
+    const items = await _origParsePlaneamento(file);
+    try {
+      const n = await savePlaneamento(items);
+      console.log('[supabase] gravadas', n, 'linhas');
+      // Após gravar, refresca o Dashboard
+      const fresh = await loadDemandFromDB();
+      applyDemandToDashboard(fresh);
+    } catch (err) {
+      console.error('[supabase] erro:', err);
+      showParseError('Parse OK mas falhou a gravar na BD: ' + err.message);
+    }
+    return items;
+  };
+
+  // ===== Marco 2: Auth flow =====
+  let authMode = 'signin'; // 'signin' | 'signup'
+
+  function updateAuthUI() {
+    document.getElementById('authSubmit').textContent = authMode === 'signin' ? 'Entrar' : 'Criar conta';
+    document.getElementById('authToggleText').textContent = authMode === 'signin' ? 'Ainda não tens conta?' : 'Já tens conta?';
+    document.getElementById('authToggleLink').textContent = authMode === 'signin' ? 'Criar conta' : 'Entrar';
+    document.getElementById('authSubtitle').textContent = authMode === 'signin'
+      ? 'Entra para aceder à app — auth interna MCF.'
+      : 'Cria a tua conta. Sem verificação de email por agora.';
+    document.getElementById('authError').classList.remove('show');
+  }
+  function showAuthError(msg) {
+    const el = document.getElementById('authError');
+    el.textContent = msg;
+    el.classList.add('show');
+  }
+  document.getElementById('authToggleLink').addEventListener('click', () => {
+    authMode = authMode === 'signin' ? 'signup' : 'signin';
+    updateAuthUI();
+  });
+  document.getElementById('authForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    const btn = document.getElementById('authSubmit');
+    btn.disabled = true;
+    btn.textContent = '...';
+    try {
+      const fn = authMode === 'signin' ? 'signInWithPassword' : 'signUp';
+      const { error } = await sb.auth[fn]({ email, password });
+      if (error) throw error;
+      // onAuthStateChange tratará do resto
+    } catch (err) {
+      showAuthError(err.message || 'Falha na autenticação');
+      btn.disabled = false;
+      updateAuthUI();
+    }
+  });
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await sb.auth.signOut();
+  });
+
+  function deriveInitials(email) {
+    if (!email) return '?';
+    const local = email.split('@')[0];
+    const parts = local.replace(/[._-]/g, ' ').split(' ').filter(Boolean);
+    if (parts.length === 0) return local.slice(0, 2).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  async function onAuthenticated(session) {
+    document.body.classList.remove('is-authenticating');
+    document.getElementById('authOverlay').style.display = 'none';
+    const email = session.user.email;
+    document.getElementById('userName').textContent = email;
+    document.getElementById('userAvatar').textContent = deriveInitials(email);
+    // Agora sim, carregar dados (RLS exige auth)
+    const data = await loadDemandFromDB();
+    applyDemandToDashboard(data);
+  }
+
+  function onUnauthenticated() {
+    document.body.classList.add('is-authenticating');
+    document.getElementById('authOverlay').style.display = 'flex';
+    document.getElementById('authSubmit').disabled = false;
+    updateAuthUI();
+    // Limpar dados visíveis (caso tenha havido login antes)
+    setDataStatus('warn', '<strong>Não autenticado.</strong> Faz login para ver os dados.');
+  }
+
+  // Bootstrap
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session) onAuthenticated(session);
+    else onUnauthenticated();
+  });
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) onAuthenticated(session);
+    else onUnauthenticated();
+  })();
 </script>
 
 </body>
