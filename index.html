@@ -1286,7 +1286,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">🎯 Pares reais detectados — dados reais de produção (AS-IS)</div>
-          <div class="panel-subtitle">Restringido a <strong>turnos estritamente puros</strong> (exactamente UMA tábua distinta em 01.x). Resolve a ambiguidade de produtos como 800×98×18 que tanto podem ser tábua principal como costaneiro. <strong>≥50% share = par claramente dominante.</strong></div>
+          <div class="panel-subtitle">Restringido a <strong>turnos estritamente puros</strong> (1 tábua em 01.x) <strong>+ mesmo comprimento</strong> (tábua e costaneiros vêm do mesmo tronco). Resolve ambiguidades operacionais. <strong>≥50% share = par claramente dominante.</strong></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <select id="paresPeriod" class="motor-input" style="font-size:0.85rem; padding:6px 10px;">
@@ -2814,12 +2814,23 @@
       }
       nPuros++;
       const [dominantTabua, dominantTon] = tEntries[0];
+      // Constraint operacional: costaneiros têm de ter mesmo comprimento que a tábua
+      // (vêm do mesmo tronco: 2500→1200, 2600→800, 2100→1000)
+      const tabDim = parseRefDim(dominantTabua);
+      const tabLen = tabDim ? tabDim.length : null;
       if (!tabuaPairs[dominantTabua]) tabuaPairs[dominantTabua] = {
-        costaneiros: {}, ton_tabua: 0, gamas: {}, turnos: 0
+        costaneiros: {}, ton_tabua: 0, gamas: {}, turnos: 0, skipped_length: 0
       };
       tabuaPairs[dominantTabua].ton_tabua += dominantTon;
       tabuaPairs[dominantTabua].turnos += 1;
       for (const [costaneiro, costTon] of cEntries) {
+        const cDim = parseRefDim(costaneiro);
+        const cLen = cDim ? cDim.length : null;
+        // Hard filter: só aceita costaneiros com mesmo comprimento
+        if (tabLen && cLen && cLen !== tabLen) {
+          tabuaPairs[dominantTabua].skipped_length += costTon;
+          continue;
+        }
         tabuaPairs[dominantTabua].costaneiros[costaneiro] = (tabuaPairs[dominantTabua].costaneiros[costaneiro] || 0) + costTon;
       }
       for (const [gama, gamaTon] of Object.entries(g.gamas)) {
