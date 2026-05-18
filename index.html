@@ -1914,7 +1914,40 @@
     }
     if (progressCb) progressCb('A extrair linhas...');
     const ws = wb.Sheets['MCF data'];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: false });
+    // raw:true para que datas venham como número serial (mais determinístico que strings)
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
+
+    function parseExcelDate(v) {
+      if (v == null) return null;
+      if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+      if (typeof v === 'number' && v > 1 && v < 100000) {
+        // Excel serial date (epoch 1899-12-30 por causa do bug do ano bissexto 1900)
+        const d = new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+        if (!isNaN(d)) return d.toISOString().slice(0, 10);
+      }
+      if (typeof v === 'string') {
+        const s = v.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+        // DD/MM/YYYY ou DD-MM-YYYY (formato PT)
+        const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (m) {
+          const [, dd, mm, yyyy] = m;
+          return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+        }
+        const d = new Date(s);
+        if (!isNaN(d)) return d.toISOString().slice(0, 10);
+      }
+      return null;
+    }
+
+    // Diagnóstico: log do tipo de data da primeira linha de dados
+    if (rows.length > 16) {
+      const probe = rows[16];
+      console.log('[debug] Primeira linha de dados — col F (data):',
+        JSON.stringify(probe[5]), 'typeof:', typeof probe[5],
+        'parsed:', parseExcelDate(probe[5]));
+    }
+
     const items = [];
     // Header in row index 15 (0-indexed for row 16 1-indexed). Data starts index 16.
     for (let i = 16; i < rows.length; i++) {
@@ -1924,22 +1957,19 @@
       if (!linha || !produto) continue;
       const ton = Number(r[9]);
       if (isNaN(ton) || ton <= 0) continue;
-      const data = r[5];       // F (data ISO ou serial)
-      let dataIso = null;
-      if (data instanceof Date) dataIso = data.toISOString().slice(0, 10);
-      else if (typeof data === 'string' && data.match(/^\d{4}-\d{2}-\d{2}/)) dataIso = data.slice(0, 10);
+      const dataIso = parseExcelDate(r[5]);
       items.push({
         data: dataIso,
-        ano: r[3] ? Number(r[3]) : null,
-        mes: r[1] ? Number(r[1]) : null,
-        semana: r[4] ? String(r[4]) : null,
-        turno: r[23] ? String(r[23]).trim() : null,
+        ano: r[3] != null ? Number(r[3]) : null,
+        mes: r[1] != null ? Number(r[1]) : null,
+        semana: r[4] != null ? String(r[4]) : null,
+        turno: r[23] != null ? String(r[23]).trim() : null,
         linha: String(linha).trim(),
         produto: String(produto).trim(),
-        tipo_produto: r[8] ? String(r[8]).trim() : null,
+        tipo_produto: r[8] != null ? String(r[8]).trim() : null,
         ton_consumed: ton,
-        gama_l01: r[13] ? String(r[13]).trim() : null,
-        gama: r[22] ? String(r[22]).trim() : null,
+        gama_l01: r[13] != null ? String(r[13]).trim() : null,
+        gama: r[22] != null ? String(r[22]).trim() : null,
         source_row: i + 1
       });
     }
