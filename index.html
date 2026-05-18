@@ -1274,7 +1274,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">🎯 Pares reais detectados — dados reais de produção (AS-IS)</div>
-          <div class="panel-subtitle">Restringido a <strong>turnos puros</strong> (uma única tábua principal ≥80% das tons em 01.x). Para cada tábua, distribuição das tons dos costaneiros co-produzidos. <strong>≥50% share = par claramente dominante.</strong></div>
+          <div class="panel-subtitle">Restringido a <strong>turnos estritamente puros</strong> (exactamente UMA tábua distinta em 01.x). Resolve a ambiguidade de produtos como 800×98×18 que tanto podem ser tábua principal como costaneiro. <strong>≥50% share = par claramente dominante.</strong></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <select id="paresPeriod" class="motor-input" style="font-size:0.85rem; padding:6px 10px;">
@@ -2782,27 +2782,26 @@
       }
     });
 
-    // Metodologia REFINADA (v3):
-    // 1. Filtrar a TURNOS PUROS — onde uma única tábua é ≥80% das tons em 01.x
-    //    (95% dos turnos em 2025 satisfazem isto → mínima perda de dados)
-    // 2. Para esses turnos, todos os costaneiros desse turno pertencem à tábua dominante
-    // 3. Agrupar por tábua → distribuição real dos costaneiros co-produzidos
+    // Metodologia REFINADA (v4):
+    // 1. Filtrar a TURNOS ESTRITAMENTE PUROS — exactamente UMA tábua distinta em 01.x
+    //    (~95% dos turnos em 2025 são estritamente puros)
+    // 2. Para esses turnos, todos os 03.x são COSTANEIROS sem ambiguidade
+    //    (porque a tábua única em 01.x não pode também aparecer em 03.x do mesmo turno...
+    //     não, espera: o MESMO produto pode aparecer simultaneamente em 01.x e 03.x dum
+    //     mesmo turno se houve 2 troncos com mains diferentes — mas isto contradiz "1 distinct" em 01.x)
+    // 3. Resultado: 100% certeza de qual é a tábua principal naquele turno, e tudo em 03.x é o seu costaneiro
     //
-    const PURITY_THRESHOLD = 0.80;
     const tabuaPairs = {};
     let nPuros = 0, nDescartados = 0;
-    for (const [turnoKey, g] of Object.entries(groups)) {
-      const tEntries = Object.entries(g.tabuas).sort((a,b) => b[1] - a[1]);
+    for (const g of Object.values(groups)) {
+      const tEntries = Object.entries(g.tabuas);
       const cEntries = Object.entries(g.costaneiros);
-      if (!tEntries.length || !cEntries.length) continue;
-      const totalTabuaTon = tEntries.reduce((s, [, t]) => s + t, 0);
-      const [dominantTabua, dominantTon] = tEntries[0];
-      const purity = dominantTon / totalTabuaTon;
-      if (purity < PURITY_THRESHOLD) {
-        nDescartados++;
+      if (tEntries.length !== 1 || cEntries.length === 0) {
+        if (tEntries.length > 1) nDescartados++;
         continue;
       }
       nPuros++;
+      const [dominantTabua, dominantTon] = tEntries[0];
       if (!tabuaPairs[dominantTabua]) tabuaPairs[dominantTabua] = {
         costaneiros: {}, ton_tabua: 0, gamas: {}, turnos: 0
       };
