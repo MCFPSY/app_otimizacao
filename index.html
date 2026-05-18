@@ -1274,7 +1274,7 @@
       <div class="panel-header">
         <div>
           <div class="panel-title">💡 Recomendações TO-BE — melhor costaneiro alternativo</div>
-          <div class="panel-subtitle">Para cada par actual (AS-IS), o algoritmo v1 testa os candidatos e propõe o costaneiro com melhor aproveitamento para a mesma tábua + gama Ø. <strong>Ganho potencial calculado a partir dos teus dados reais.</strong> Ordenado por €/ano.</div>
+          <div class="panel-subtitle">Para cada par actual (AS-IS), testa candidatos do <strong>mesmo comprimento</strong> da tábua (constraint operacional: tábua e costaneiros vêm do mesmo tronco → mesmo comprimento) e propõe o costaneiro com melhor aproveitamento para a mesma tábua + gama Ø. Ordenado por €/ano.</div>
         </div>
         <span class="pill pill-blue" id="toBeTotal">—</span>
       </div>
@@ -2942,14 +2942,16 @@
     const preco = Number(engineSettings.preco_eur_ton);
 
     // Conjunto de candidatos = todos os costaneiros que aparecem nos pares (dominante + alternativas)
-    // Isto reflecte as opções operacionalmente conhecidas
-    const candidatos = new Map();  // dim_key (WxH) → name
+    // Manter o comprimento na key para podermos depois filtrar por compatibilidade operacional
+    // (tábua e costaneiro têm de vir do mesmo tronco → mesmo comprimento)
+    const candidatos = new Map();
     for (const p of pairs) {
       [p.dominant_costaneiro, ...p.alternatives.map(a => a.costaneiro)].forEach(c => {
         const d = parseRefDim(c);
         if (!d || !d.W || !d.H) return;
-        const key = `${d.W}x${d.H}`;
-        if (!candidatos.has(key)) candidatos.set(key, { name: c, W: d.W, H: d.H });
+        const len = d.length || 0;  // sem length não filtramos por isto
+        const key = `${len}x${d.W}x${d.H}`;
+        if (!candidatos.has(key)) candidatos.set(key, { name: c, length: len, W: d.W, H: d.H });
       });
     }
 
@@ -2959,6 +2961,10 @@
       const D = gamaToD(p.gama_dominante);
       const curCost = parseRefDim(p.dominant_costaneiro);
       if (!tab || !D || !curCost || !tab.W || !tab.H || !curCost.W || !curCost.H) continue;
+      // Constraint operacional: tábua e costaneiro têm de ter mesmo comprimento
+      // (cortados do mesmo tronco: 2500→2×1200, 2600→3×800, 2100→2×1000)
+      const tabLength = tab.length;
+      if (!tabLength) continue;
 
       const asR = calcAproveitamento(D, tab.W, tab.H, curCost.W, curCost.H, kerf_d, kerf_f, cap, piVal);
       if (asR.error) continue;
@@ -2966,6 +2972,8 @@
 
       let bestR = asR, bestCandName = p.dominant_costaneiro;
       for (const c of candidatos.values()) {
+        // HARD: apenas candidatos do mesmo comprimento da tábua
+        if (c.length !== tabLength) continue;
         const r = calcAproveitamento(D, tab.W, tab.H, c.W, c.H, kerf_d, kerf_f, cap, piVal);
         if (r.error) continue;
         if (r.aproveitamento > bestR.aproveitamento + 0.001) {  // threshold 0.1pp
