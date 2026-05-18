@@ -1269,6 +1269,18 @@
     <h2 class="section-title">Combinações</h2>
     <p class="section-subtitle">Output #1 do modelo: para cada referência produzida, o corte concreto recomendado.</p>
 
+    <!-- Marco 5.3: Pares reais detectados a partir da produção -->
+    <div class="panel panel-accent-green" id="paresReaisPanel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">🎯 Pares reais detectados — dados reais de produção</div>
+          <div class="panel-subtitle">Para cada tábua principal (linha 01.1), o costaneiro com que foi mais frequentemente co-produzido na mesma dia×turno (linha 03.x). <strong>≥75% confidence = par dominante.</strong></div>
+        </div>
+        <span class="pill pill-blue" id="paresReaisCount">—</span>
+      </div>
+      <div id="paresReaisContent" style="margin-top:8px;">A carregar dados de produção...</div>
+    </div>
+
     <div class="status-row">
       <div class="stat-box"><div class="label">Refs analisadas</div><div class="val">49</div></div>
       <div class="stat-box"><div class="label">Com ganho &gt;50 ton/ano</div><div class="val">17</div></div>
@@ -2378,6 +2390,8 @@
     ]);
     applyDemandToDashboard(demand);
     applyProducaoToDashboard(prodSummary);
+    // Marco 5.3: detectar pares reais em background (não bloqueia UI)
+    refreshParesReais().catch(err => console.error('refreshParesReais:', err));
   }
 
   // ===== Marco 5.1: Engine settings (Motor tab) =====
@@ -2678,6 +2692,183 @@
   });
   // Primeira execução quando a tab Motor é aberta — usamos hashchange ou DOMContentLoaded
   setTimeout(rerunCalc, 100);
+
+  // ===== Marco 5.3: Pares reais a partir da produção =====
+  //
+  // Algoritmo:
+  // 1. Para cada (data, turno), identificar tábua dominante em linha 01.x e costaneiro dominante em linha 03.x
+  // 2. Por cada tábua, agregar as ocorrências de cada costaneiro pareado
+  // 3. Calcular "dominância": share do costaneiro mais frequente / total ocorrências
+  //
+  function parseRefDim(s) {
+    if (!s) return null;
+    const m = String(s).match(/^(\d+)\s*[x×*]\s*(\d+)(?:\s*[x×*]\s*(\d+))?$/i);
+    if (!m) return null;
+    const [, a, b, c] = m;
+    if (c) return { length: +a, W: +b, H: +c };
+    return { W: +a, H: +b };
+  }
+
+  function gamaToD(gama) {
+    if (!gama) return null;
+    let m = gama.match(/(\d+)\s*-\s*(\d+)\s*mm?$/i) || gama.match(/-\s*(\d+)\s*-\s*(\d+)/);
+    if (m) return (+m[1] + +m[2]) / 2;
+    m = gama.match(/<\s*(\d+)/);
+    if (m) return Math.max(120, +m[1] - 10);
+    m = gama.match(/>\s*(\d+)/);
+    if (m) return +m[1] + 15;
+    return null;
+  }
+
+  async function loadAllProducaoForPares() {
+    let all = []; let from = 0; const PAGE = 1000;
+    while (true) {
+      const { data, error } = await sb
+        .from('producao_diaria')
+        .select('data, turno, linha, produto, ton_consumed, gama_l01, tipo_produto')
+        .not('data', 'is', null)
+        .not('turno', 'is', null)
+        .range(from, from + PAGE - 1);
+      if (error) { console.error('loadProducaoForPares:', error); return []; }
+      if (!data || data.length === 0) break;
+      all = all.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  }
+
+  function detectParesReais(rows) {
+    // Group by (data, turno)
+    const groups = {};
+    rows.forEach(r => {
+      if (!r.linha || !r.produto || !r.data || !r.turno) return;
+      const linha = String(r.linha);
+      const isTabua = linha === '01.1' || linha === '01.2';
+      const isCostaneiro = linha.startsWith('03.');
+      if (!isTabua && !isCostaneiro) return;
+      const key = r.data + '|' + r.turno;
+      if (!groups[key]) groups[key] = { tabuas: {}, costaneiros: {}, gamas: {} };
+      const bucket = isTabua ? groups[key].tabuas : groups[key].costaneiros;
+      bucket[r.produto] = (bucket[r.produto] || 0) + Number(r.ton_consumed || 0);
+      if (isTabua && r.gama_l01) {
+        groups[key].gamas[r.gama_l01] = (groups[key].gamas[r.gama_l01] || 0) + Number(r.ton_consumed || 0);
+      }
+    });
+
+    // For each turno, find dominant tabua + dominant costaneiro
+    const tabuaToCostaneiros = {};   // tabua → { occurrences: { costaneiro: count }, gamas: { gama: count }, totalTon: number }
+    let nTurnos = 0;
+    for (const g of Object.values(groups)) {
+      const tEntries = Object.entries(g.tabuas).sort((a,b) => b[1] - a[1]);
+      const cEntries = Object.entries(g.costaneiros).sort((a,b) => b[1] - a[1]);
+      if (!tEntries.length || !cEntries.length) continue;
+      nTurnos++;
+      const tabua = tEntries[0][0];
+      const costaneiro = cEntries[0][0];
+      if (!tabuaToCostaneiros[tabua]) tabuaToCostaneiros[tabua] = { occurrences: {}, gamas: {}, totalTon: 0 };
+      tabuaToCostaneiros[tabua].occurrences[costaneiro] = (tabuaToCostaneiros[tabua].occurrences[costaneiro] || 0) + 1;
+      tabuaToCostaneiros[tabua].totalTon += tEntries[0][1];
+      // Agg gamas of this turno into the tabua
+      Object.entries(g.gamas).forEach(([gama, ton]) => {
+        tabuaToCostaneiros[tabua].gamas[gama] = (tabuaToCostaneiros[tabua].gamas[gama] || 0) + ton;
+      });
+    }
+
+    // Build result list with dominant + confidence
+    const result = [];
+    for (const [tabua, { occurrences, gamas, totalTon }] of Object.entries(tabuaToCostaneiros)) {
+      const sorted = Object.entries(occurrences).sort((a,b) => b[1] - a[1]);
+      const totalOcc = sorted.reduce((s, [, n]) => s + n, 0);
+      const [dominantCost, dominantN] = sorted[0];
+      const gamasSorted = Object.entries(gamas).sort((a,b) => b[1] - a[1]);
+      result.push({
+        tabua,
+        dominant_costaneiro: dominantCost,
+        confidence: dominantN / totalOcc,
+        n_turnos: totalOcc,
+        ton_total: totalTon,
+        gama_dominante: gamasSorted[0] ? gamasSorted[0][0] : null,
+        alternatives: sorted.slice(1, 4).map(([c, n]) => ({ costaneiro: c, share: n / totalOcc })),
+      });
+    }
+    // Order by total ton (importance)
+    result.sort((a, b) => b.ton_total - a.ton_total);
+    return { pairs: result, nTurnos };
+  }
+
+  function renderParesReais(pairs, nTurnos) {
+    const el = document.getElementById('paresReaisContent');
+    const countEl = document.getElementById('paresReaisCount');
+    if (!el) return;
+    if (!pairs || pairs.length === 0) {
+      el.innerHTML = '<div class="empty-state" style="padding:32px;"><p>Sem dados de produção carregados (precisa de upload em <a href="#dados" onclick="switchToTab(\'dados\');return false;">Dados</a>).</p></div>';
+      if (countEl) countEl.textContent = '—';
+      return;
+    }
+    if (countEl) countEl.textContent = `${pairs.length} tábuas · ${nTurnos} turnos analisados`;
+    // Pre-load engine settings for calc
+    const cap = engineSettings ? Number(engineSettings.cap_costaneiros) : 3;
+    const kerf_d = engineSettings ? Number(engineSettings.kerf_disco_mm) : 3.2;
+    const kerf_f = engineSettings ? Number(engineSettings.kerf_fita_mm) : 2.5;
+    const piVal = engineSettings ? Number(engineSettings.pi_value) : 3.14;
+
+    const top = pairs.slice(0, 15);
+    const rows = top.map(p => {
+      const tab = parseRefDim(p.tabua);
+      const cost = parseRefDim(p.dominant_costaneiro);
+      const D = gamaToD(p.gama_dominante);
+      let aprovStr = '—';
+      let aprovClass = '';
+      if (tab && cost && D && tab.W && tab.H && cost.W && cost.H) {
+        const r = calcAproveitamento(D, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
+        if (!r.error) {
+          aprovStr = (r.aproveitamento * 100).toFixed(1) + '%';
+          aprovClass = r.aproveitamento >= 0.55 ? 'delta-positive' : (r.aproveitamento >= 0.45 ? '' : 'delta-negative');
+        } else {
+          aprovStr = '<span class="pill pill-grey" title="' + r.error + '">N/A</span>';
+        }
+      }
+      const confPct = (p.confidence * 100).toFixed(0);
+      const confPill = p.confidence >= 0.75 ? 'pill-green' : (p.confidence >= 0.5 ? 'pill-orange' : 'pill-red');
+      return `<tr>
+        <td><strong>${p.tabua}</strong></td>
+        <td>${p.dominant_costaneiro}</td>
+        <td><span class="pill ${confPill}" style="font-size:0.7rem;">${confPct}%</span></td>
+        <td class="num">${p.n_turnos}</td>
+        <td class="num">${fmtNum(p.ton_total)}</td>
+        <td>${p.gama_dominante || '—'}</td>
+        <td class="num ${aprovClass}">${aprovStr}</td>
+        <td>${p.alternatives.length ? p.alternatives.map(a => `${a.costaneiro} (${(a.share*100).toFixed(0)}%)`).join(', ') : '<span style="color:var(--color-text-tertiary)">único</span>'}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Tábua (P)</th>
+            <th>Costaneiro dominante (C)</th>
+            <th>Confidence</th>
+            <th class="num">Nº turnos</th>
+            <th class="num">Ton (tábua)</th>
+            <th>Gama Ø dominante</th>
+            <th class="num">Aprov. (algoritmo v1)</th>
+            <th>Alternativas</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-top:12px;">
+        Top ${top.length} de ${pairs.length} tábuas, ordenadas por ton consumida. Algoritmo v1 sub-estima ~5-15pp vs. Folha5 — refinamento na próxima iteração (MIDDLE segments + orientações alternativas).
+      </div>`;
+  }
+
+  async function refreshParesReais() {
+    const rows = await loadAllProducaoForPares();
+    const { pairs, nTurnos } = detectParesReais(rows);
+    renderParesReais(pairs, nTurnos);
+  }
 
   function onUnauthenticated() {
     document.body.classList.add('is-authenticating');
