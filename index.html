@@ -1779,9 +1779,43 @@
       </div>
     </div>
 
-    <div class="panel panel-accent-orange" style="border-left:4px solid var(--color-orange);">
-      <div class="panel-title">🚧 Algoritmo geométrico — em desenvolvimento</div>
-      <p>Os parâmetros acima já são guardados e usados onde aplicável (ex.: <code>preço €/ton</code> e <code>rácio ton/m³</code> em conversões). O <strong>algoritmo de packing</strong> (calcular aproveitamento para qualquer tábua × costaneiro × Ø rolaria via JS, substituindo o lookup de Folha5) está em desenvolvimento na próxima sessão. Quando estiver pronto, qualquer alteração aqui re-calcula automaticamente Dashboard, Combinações, Compra e Triagem.</p>
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">🧮 Calculadora de aproveitamento (algoritmo v1)</div>
+          <div class="panel-subtitle">Implementação em JS do algoritmo de packing (porting do Folha5). Usa os parâmetros editáveis acima. <strong>Mexe nos inputs para ver impacto em tempo real.</strong></div>
+        </div>
+        <span class="pill pill-orange">v1 simplificado</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:16px;">
+        <div>
+          <label class="slider-label">Tábua principal · largura (mm)</label>
+          <input type="number" id="calcW" class="motor-input" value="145" step="1" min="20" max="300">
+        </div>
+        <div>
+          <label class="slider-label">Tábua principal · espessura (mm)</label>
+          <input type="number" id="calcH" class="motor-input" value="22" step="1" min="5" max="100">
+        </div>
+        <div>
+          <label class="slider-label">Diâmetro toro (mm)</label>
+          <input type="number" id="calcD" class="motor-input" value="195" step="1" min="100" max="500">
+        </div>
+        <div>
+          <label class="slider-label">Costaneiro · largura (mm)</label>
+          <input type="number" id="calcCW" class="motor-input" value="95" step="1" min="20" max="200">
+        </div>
+        <div>
+          <label class="slider-label">Costaneiro · espessura (mm)</label>
+          <input type="number" id="calcCH" class="motor-input" value="14" step="1" min="5" max="50">
+        </div>
+        <div>
+          <label class="slider-label">Comprimento toro (mm)</label>
+          <input type="number" id="calcL" class="motor-input" value="2500" step="50" min="500" max="3000">
+        </div>
+      </div>
+
+      <div id="calcResult" style="margin-top:20px;"></div>
     </div>
 
     <div class="panel">
@@ -2440,12 +2474,210 @@
   // Wire UI
   ['paramKerfDisco','paramKerfFita','paramCap','paramPi','paramRatio','paramPreco','paramNotes'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', checkMotorDirty);
+    if (el) el.addEventListener('input', () => { checkMotorDirty(); rerunCalc(); });
   });
   const motorSaveBtn = document.getElementById('motorSave');
   if (motorSaveBtn) motorSaveBtn.addEventListener('click', saveEngineSettings);
   const motorResetBtn = document.getElementById('motorReset');
   if (motorResetBtn) motorResetBtn.addEventListener('click', resetEngineToCanonical);
+
+  // ===== Marco 5.2: Algoritmo geométrico (calcAproveitamento) =====
+  //
+  // PORTING do Folha5 para JS. Versão v1 simplificada:
+  // - TOP/BOTTOM packing: costaneiros em strips horizontais acima e abaixo da tábua principal
+  // - LEFT/RIGHT packing: costaneiros rotados 90°, em strips verticais à esquerda e direita
+  // - Cap aplicado por região (max N strips por TOP/BOTTOM/LEFT/RIGHT)
+  // - Kerfs: disco entre strips (corte principal), fita entre costaneiros dentro de uma strip
+  // - NÃO modelado nesta v1: MIDDLE segments (espaço diagonal entre tábua e arco do círculo)
+  //
+  // Validação contra mockup (800×145×22 + 95×14 + Ø195 ≈ 54.6%): mostrado no UI.
+  //
+  function calcAproveitamento(D, W, H, w, h, kerf_d, kerf_f, cap, piVal) {
+    // Validações geométricas
+    const PI = piVal || Math.PI;
+    if (D <= 0 || W <= 0 || H <= 0 || w <= 0 || h <= 0) {
+      return { error: 'Dimensões têm de ser positivas' };
+    }
+    const R = D / 2;
+    // Tábua principal centrada — verifica se cabe no círculo
+    const diagSq = (W/2)**2 + (H/2)**2;
+    if (diagSq > R*R) {
+      return { error: `Tábua ${W}×${H} não cabe em Ø${D} (diagonal/2 = ${Math.sqrt(diagSq).toFixed(1)} > ${R})` };
+    }
+    const areaCircle = PI * R * R;
+    const areaMain = W * H;
+
+    // Função: quantos costaneiros de largura `cw` cabem numa strip de largura disponível `availW`
+    // entre extremos curvos, com kerf_fita entre adjacentes
+    function fitInStrip(availW, cw) {
+      if (availW <= 0) return 0;
+      // Modelo: (cw + kerf_f) × n - kerf_f <= availW  → n <= (availW + kerf_f) / (cw + kerf_f)
+      const n = Math.floor((availW + kerf_f) / (cw + kerf_f));
+      return Math.max(0, n);
+    }
+
+    // TOP region: empilhar strips de costaneiros (w largo, h alto)
+    // Cada strip tem topo em y_top; chord do círculo a essa altura define availW
+    function packVertical(W_main, H_main, cw, ch, capN) {
+      let yTopMain = H_main / 2;
+      let count = 0;
+      const stripCounts = [];
+      for (let k = 0; k < capN; k++) {
+        const yBot = yTopMain + kerf_d;            // gap entre tábua/strip anterior e nova
+        const yTop = yBot + ch;
+        if (yTop > R) { stripCounts.push({ row: k+1, fits: false, reason: 'strip além do círculo' }); break; }
+        // Chord no TOPO da strip (ponto mais estreito da strip dentro do círculo)
+        const chord = 2 * Math.sqrt(R*R - yTop*yTop);
+        const n = fitInStrip(chord, cw);
+        stripCounts.push({ row: k+1, yTop, chord, n });
+        count += n;
+        if (n === 0) break;  // se não cabe nenhum, parar (proximos também não)
+        yTopMain = yTop;
+      }
+      return { count, strips: stripCounts };
+    }
+
+    const top = packVertical(W, H, w, h, cap);
+    // BOTTOM simétrico ao TOP
+    const bottomCount = top.count;
+
+    // LEFT/RIGHT: rotar costaneiro 90° (h fica horizontal, w fica vertical)
+    // Reusar packVertical mas com (Wmain=H, Hmain=W, cw=w, ch=h) — interpretando o círculo igual
+    // mas trocando eixos. A função pega yTop=H/2 e empilha para "cima"; agora "cima" = "direita"
+    // do círculo original. cw é a dimensão paralela ao chord (era w → continua w, comprida).
+    // ch é a dimensão "perpendicular" empilhada (era h → continua h, fina).
+    // MAS a forma muda: agora o costaneiro encara-se com h como "largura horizontal no espaço left/right"
+    // e w como "altura vertical". Portanto cw=w, ch=h não muda — o que muda é a orientação do main rect.
+    const right = packVertical(H, W, w, h, cap);
+    // Esperar... isto não está bem. Re-pensar:
+    // No RIGHT region, o "chord vertical" do círculo à direita do main rect é a "largura disponível".
+    // O costaneiro fica em pé (w como altura, h como largura). A "strip vertical" tem:
+    //   - largura horizontal = h (espessura do costaneiro)
+    //   - altura vertical = limitada pelo chord vertical do círculo a essa coordenada x
+    // Então: x_right_main = W/2. Primeira strip ocupa x in [W/2+kerf_d, W/2+kerf_d+h].
+    //   No x mais à direita da strip (x = W/2+kerf_d+h), a chord vertical do círculo é:
+    //     chord_v = 2*sqrt(R²-x²)
+    //   Quantos costaneiros (cada com altura w) cabem em chord_v com kerf_f entre eles:
+    //     n = floor((chord_v + kerf_f) / (w + kerf_f))
+    //
+    // Esta lógica é exactamente packVertical com (Wmain=W, Hmain=H trocados, cw=w, ch=h) MAS o
+    // "Hmain/2" inicial usado no packVertical era do main na direcção empilhamento. Agora o
+    // "empilhamento" é horizontal (a partir de W/2), e o costaneiro fica "alto", então:
+    //   - posição inicial yTopMain → xRightMain = W/2
+    //   - kerf_d entre tábua e strip
+    //   - ch = h (largura horizontal do costaneiro na strip)
+    //   - cw = w (altura vertical → este é o cw para fitInStrip)
+    // Portanto chamamos packVertical(W_main=any unused, H_main=W, cw=w, ch=h) onde H_main define metade do começo
+    // O packVertical usa yTopMain = H_main/2 = W/2 ✓ e empilha para fora
+    // chord(yTop) = 2*sqrt(R²-yTop²) — é o chord HORIZONTAL no original, mas em LEFT/RIGHT precisamos
+    // do chord VERTICAL a um certo x. Geometricamente o círculo é simétrico — chord(x) é o mesmo
+    // independente de eixo (rotation invariance). Então a fórmula é a mesma.
+    //
+    // BOTTOM e LEFT são simétricos a TOP e RIGHT.
+    const leftCount = right.count;
+
+    const totalCostaneiros = top.count + bottomCount + right.count + leftCount;
+    const areaCost = w * h;
+    const areaWood = areaMain + totalCostaneiros * areaCost;
+    const aproveitamento = areaWood / areaCircle;
+
+    return {
+      aproveitamento,
+      desperdicio: 1 - aproveitamento,
+      areaCircle, areaMain, areaCost, areaWood,
+      n: { top: top.count, bottom: bottomCount, right: right.count, left: leftCount, total: totalCostaneiros },
+      details: { top: top.strips, right: right.strips }
+    };
+  }
+
+  function fmtPct(n, dec=1) { return n == null ? '—' : (n*100).toFixed(dec) + '%'; }
+
+  function rerunCalc() {
+    const W = Number(document.getElementById('calcW')?.value);
+    const H = Number(document.getElementById('calcH')?.value);
+    const D = Number(document.getElementById('calcD')?.value);
+    const cw = Number(document.getElementById('calcCW')?.value);
+    const ch = Number(document.getElementById('calcCH')?.value);
+    const L = Number(document.getElementById('calcL')?.value);
+    const kerf_d = Number(document.getElementById('paramKerfDisco')?.value) || 3.2;
+    const kerf_f = Number(document.getElementById('paramKerfFita')?.value) || 2.5;
+    const cap = Number(document.getElementById('paramCap')?.value) || 3;
+    const piVal = Number(document.getElementById('paramPi')?.value) || 3.14;
+
+    const out = document.getElementById('calcResult');
+    if (!out || !W || !H || !D || !cw || !ch) return;
+
+    const r = calcAproveitamento(D, W, H, cw, ch, kerf_d, kerf_f, cap, piVal);
+    if (r.error) {
+      out.innerHTML = `<div class="banner banner-error"><strong>⚠</strong> ${r.error}</div>`;
+      return;
+    }
+
+    // Volumes (m³): área × comprimento / 1e9
+    const vol_main_per_log = r.areaMain * L / 1e9;
+    const vol_cost_per_log = r.areaCost * r.n.total * L / 1e9;
+    const vol_log = r.areaCircle * L / 1e9;
+
+    // Comparação com mockup conhecido (800×145×22 + 95×14 + Ø195)
+    const isKnownCase = (W===145 && H===22 && cw===95 && ch===14 && D===195);
+    const mockupAprov = 0.546;
+    const delta = isKnownCase ? (r.aproveitamento - mockupAprov) : null;
+
+    out.innerHTML = `
+      <div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:24px;">
+        <div>
+          <div class="sim-result" style="margin-top:0;">
+            <div>
+              <div class="label">Aproveitamento (algoritmo v1)</div>
+              <div class="value">${fmtPct(r.aproveitamento)}</div>
+              <div style="margin-top:6px; opacity:0.85; font-size:0.85rem;">Desperdício ${fmtPct(r.desperdicio)} · ${r.n.total} costaneiros</div>
+            </div>
+            <div>
+              <div class="label">Por tronco de ${L}mm</div>
+              <div class="value" style="font-size:1.5rem;">${vol_main_per_log.toFixed(4)} m³</div>
+              <div style="margin-top:6px; opacity:0.85; font-size:0.85rem;">Tábua principal + ${vol_cost_per_log.toFixed(4)} m³ costaneiros = ${(vol_main_per_log+vol_cost_per_log).toFixed(4)} m³ útil / ${vol_log.toFixed(4)} m³ rolaria</div>
+            </div>
+          </div>
+
+          ${isKnownCase ? `
+            <div class="banner banner-${Math.abs(delta) < 0.05 ? 'info' : 'warn'}" style="margin-top:16px;">
+              <strong>Validação vs. mockup (800×145×22 + 95×14, Ø195):</strong>
+              Mockup esperado <strong>${fmtPct(mockupAprov)}</strong>, algoritmo dá <strong>${fmtPct(r.aproveitamento)}</strong>.
+              Δ = <strong>${delta>=0?'+':''}${(delta*100).toFixed(1)}pp</strong>.
+              ${Math.abs(delta) < 0.05
+                ? 'Dentro de ±5pp — aceitável para v1, refinamento de MIDDLE segments na próxima iteração.'
+                : 'Desvio significativo — o algoritmo está a sub/sobreestimar. Necessário refinamento.'}
+            </div>` : ''}
+        </div>
+
+        <div>
+          <div style="font-weight:600; margin-bottom:8px; font-size:0.9rem;">Decomposição de costaneiros</div>
+          <table class="data">
+            <tr><th>Região</th><th class="num">N</th><th class="num">Área (mm²)</th></tr>
+            <tr><td>TOP (acima da tábua)</td><td class="num">${r.n.top}</td><td class="num">${(r.n.top*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>BOTTOM (abaixo)</td><td class="num">${r.n.bottom}</td><td class="num">${(r.n.bottom*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>RIGHT (à direita)</td><td class="num">${r.n.right}</td><td class="num">${(r.n.right*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>LEFT (à esquerda)</td><td class="num">${r.n.left}</td><td class="num">${(r.n.left*r.areaCost).toFixed(0)}</td></tr>
+            <tr class="summary"><td>Total madeira útil</td><td class="num">${r.n.total + 1}</td><td class="num">${r.areaWood.toFixed(0)}</td></tr>
+            <tr><td colspan="2">Área do círculo</td><td class="num">${r.areaCircle.toFixed(0)}</td></tr>
+          </table>
+          ${r.details.top && r.details.top.length ? `
+            <details style="margin-top:12px; font-size:0.85rem;">
+              <summary style="cursor:pointer; color:var(--color-text-secondary);">Detalhes packing TOP (cada strip)</summary>
+              <pre style="background:var(--color-background); padding:8px; border-radius:6px; font-size:0.75rem; overflow:auto;">${JSON.stringify(r.details.top, null, 2)}</pre>
+            </details>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Re-run quando o user mexe nos inputs
+  ['calcW','calcH','calcD','calcCW','calcCH','calcL'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', rerunCalc);
+  });
+  // Primeira execução quando a tab Motor é aberta — usamos hashchange ou DOMContentLoaded
+  setTimeout(rerunCalc, 100);
 
   function onUnauthenticated() {
     document.body.classList.add('is-authenticating');
