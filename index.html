@@ -2830,6 +2830,74 @@
     return { W: +a, H: +b };
   }
 
+  // Retorna lista de Ø discretos dentro de uma gama (passo 10mm)
+  // Ex: "2100 mm - <190mm" → [150, 160, 170, 180, 190]
+  // Ex: "2500 mm - 181 a 210mm" → [181, 191, 201, 211] (ou step 10: [180,190,200,210])
+  // Ex: "2500 mm - >280mm" → [280, 290, 300, 320]
+  function gamaToDiametros(gama) {
+    if (!gama) return [];
+    const s = String(gama);
+    let m = s.match(/(\d+)\s*(?:a|-|até|to|–|—)\s*(\d+)\s*mm/i);
+    if (m) {
+      const lo = +m[1], hi = +m[2];
+      const out = [];
+      // Step de 10, alinhado a múltiplo de 10
+      const start = Math.round(lo / 10) * 10;
+      for (let d = start; d <= hi; d += 10) out.push(d);
+      if (out.length === 0) out.push(Math.round((lo+hi)/2));
+      return out;
+    }
+    m = s.match(/<\s*(\d+)/);
+    if (m) {
+      const hi = +m[1];
+      const lo = Math.max(130, hi - 50);
+      const out = [];
+      for (let d = lo; d <= hi; d += 10) out.push(d);
+      return out;
+    }
+    m = s.match(/>\s*(\d+)/);
+    if (m) {
+      const lo = +m[1];
+      const out = [];
+      for (let d = lo; d <= lo + 50; d += 10) out.push(d);
+      return out;
+    }
+    return [];
+  }
+
+  // Calcula aprov médio sobre todos os Ø da gama (uniforme)
+  // Quando tivermos raio-X parser, podemos ponderar pela distribuição real
+  function calcAprovMedioGama(gama, W, H, w, h, kerf_d, kerf_f, cap, piVal) {
+    const diameters = gamaToDiametros(gama);
+    if (diameters.length === 0) return { error: 'Gama sem Ø interpretável' };
+    let totalAprov = 0, totalN_main = 0, totalAreaCost = 0, totalAreaMain = 0, totalAreaCircle = 0;
+    let count = 0;
+    for (const D of diameters) {
+      const r = calcAproveitamento(D, W, H, w, h, kerf_d, kerf_f, cap, piVal);
+      if (r.error) {
+        // Para Ø onde a tábua nem cabe, aprov = 0 (mas conta no average para penalizar)
+        totalAprov += 0;
+        count++;
+        continue;
+      }
+      totalAprov += r.aproveitamento;
+      totalN_main += r.n.main;
+      totalAreaMain += r.areaMain;
+      totalAreaCost += r.n.total * r.areaCost;
+      totalAreaCircle += r.areaCircle;
+      count++;
+    }
+    if (count === 0) return { error: 'Nenhum Ø viável' };
+    return {
+      aproveitamento: totalAprov / count,
+      avgN_main: totalN_main / count,
+      avgAreaMain: totalAreaMain / count,
+      avgAreaCost: totalAreaCost / count,
+      avgAreaCircle: totalAreaCircle / count,
+      nDiameters: count,
+    };
+  }
+
   function gamaToD(gama) {
     if (!gama) return null;
     const s = String(gama);
@@ -3074,17 +3142,16 @@
     console.log('[LP] candidatos costaneiros considerados:', allCosts.size);
     for (const p of pairs) {
       const tab = parseRefDim(p.tabua);
-      const D = gamaToD(p.gama_dominante);
-      if (!tab || !D || !tab.length) continue;
+      if (!tab || !tab.length) continue;
       for (const costName of allCosts) {
         const cost = parseRefDim(costName);
         if (!cost || !cost.length || cost.length !== tab.length) continue;
-        const r = calcAproveitamento(D, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
-        if (r.error) continue;
-        // K = ton de rolaria por unit volume de tábua produzida nesta combinação
-        // = area_circle / (N_main × area_tábua) — assumindo densidades uniformes
-        const K = r.areaCircle / (r.n.main * tab.W * tab.H);
-        const coRatio = r.n.total * (cost.W * cost.H) / (r.n.main * tab.W * tab.H);
+        // CRÍTICO: usar média sobre todos os Ø dentro da gama, não único midpoint
+        const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
+        if (r.error || r.avgN_main === 0) continue;
+        // K = area média do círculo / volume médio de tábua principal
+        const K = r.avgAreaCircle / r.avgAreaMain;
+        const coRatio = r.avgAreaCost / r.avgAreaMain;
         candidates.push({
           tabua: p.tabua, cost: costName, aprov: r.aproveitamento,
           coRatio, K, gama: p.gama_dominante,
@@ -3175,11 +3242,10 @@
     for (const p of pairs) {
       const tab = parseRefDim(p.tabua);
       const cost = parseRefDim(p.dominant_costaneiro);
-      const D = gamaToD(p.gama_dominante);
-      if (!tab || !cost || !D || !tab.length || cost.length !== tab.length) continue;
-      const r = calcAproveitamento(D, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
-      if (r.error) continue;
-      const K = r.areaCircle / (r.n.main * tab.W * tab.H);
+      if (!tab || !cost || !tab.length || cost.length !== tab.length) continue;
+      const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
+      if (r.error || !r.avgAreaMain) continue;
+      const K = r.avgAreaCircle / r.avgAreaMain;
       const demand = Number(demandMap.get(p.tabua) || 0);
       totalRolariaAS += K * demand;
       totalTabuaAS += demand;
@@ -3290,14 +3356,13 @@
       const p = pairs.find(p => p.tabua === tabua);
       if (!p) continue;
       const tab = parseRefDim(tabua);
-      const D = gamaToD(p.gama_dominante);
-      if (!tab || !D) continue;
+      if (!tab) continue;
       const curCostName = p.dominant_costaneiro;
       const curCost = parseRefDim(curCostName);
       if (!curCost || curCost.length !== tab.length) continue;
-      const asR = calcAproveitamento(D, tab.W, tab.H, curCost.W, curCost.H, kerf_d, kerf_f, cap, piVal);
-      if (asR.error) continue;
-      const asK = asR.areaCircle / (asR.n.main * tab.W * tab.H);
+      const asR = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, curCost.W, curCost.H, kerf_d, kerf_f, cap, piVal);
+      if (asR.error || !asR.avgAreaMain) continue;
+      const asK = asR.avgAreaCircle / asR.avgAreaMain;
       const asRolaria = asK * grp.totalVolume;
       const toRolaria = grp.allocations.reduce((s, a) => s + a.K * a.volume, 0);
       const savedRolariaVol = asRolaria - toRolaria;
