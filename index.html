@@ -1837,6 +1837,16 @@
           <input type="number" id="paramPreco" step="0.5" min="0" max="500" class="motor-input">
           <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Para converter ton poupadas em €. Canónico: <strong>85</strong>.</div>
         </div>
+        <div>
+          <label class="slider-label" for="paramDensity">Densidade rolaria (ton/m³)</label>
+          <input type="number" id="paramDensity" step="0.01" min="0.5" max="1.2" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Densidade do pinho fresco. Canónico: <strong>0.85</strong>. Usado em todas as conversões m³ rolaria → ton.</div>
+        </div>
+        <div>
+          <label class="slider-label" for="paramDemandTol">Tolerância de demanda (±%)</label>
+          <input type="number" id="paramDemandTol" step="0.5" min="0" max="50" class="motor-input">
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">O LP pode entregar entre <strong>(1−tol)·D</strong> e <strong>(1+tol)·D</strong> de cada produto. Canónico: <strong>10</strong>%. Permite tirar mais ganhos sem comprometer a cesta na prática operacional.</div>
+        </div>
       </div>
 
       <div style="margin-top:24px;">
@@ -2470,10 +2480,13 @@
     paramPi: 'pi_value',
     paramRatio: 'ratio_ton_m3',
     paramPreco: 'preco_eur_ton',
+    paramDensity: 'density_rolaria_ton_m3',
+    paramDemandTol: 'demand_tolerance_pct',
   };
   const CANONICAL = {
     kerf_disco_mm: 3.2, kerf_fita_mm: 2.5, cap_costaneiros: 3,
     pi_value: 3.14, ratio_ton_m3: 2.13, preco_eur_ton: 85.00,
+    density_rolaria_ton_m3: 0.85, demand_tolerance_pct: 10.0,
   };
   let engineSettings = null;
 
@@ -2492,6 +2505,9 @@
       setMotorStatus('warn', '<strong>Erro a carregar settings:</strong> ' + error.message);
       return null;
     }
+    // Hidratar com canónicos se DB ainda não tem colunas novas
+    if (data && data.density_rolaria_ton_m3 == null) data.density_rolaria_ton_m3 = CANONICAL.density_rolaria_ton_m3;
+    if (data && data.demand_tolerance_pct == null) data.demand_tolerance_pct = CANONICAL.demand_tolerance_pct;
     engineSettings = data;
     applyEngineSettingsToForm(data);
     return data;
@@ -2501,7 +2517,10 @@
     if (!s) return;
     for (const [inputId, dbKey] of Object.entries(PARAM_KEYS)) {
       const el = document.getElementById(inputId);
-      if (el && s[dbKey] != null) el.value = Number(s[dbKey]);
+      if (!el) continue;
+      // Se a coluna ainda não existe na DB (migration pendente), usa canónico
+      const v = s[dbKey] != null ? s[dbKey] : CANONICAL[dbKey];
+      if (v != null) el.value = Number(v);
     }
     document.getElementById('paramNotes').value = s.notes || '';
     document.getElementById('motorUpdatedAt').textContent = s.updated_at ? fmtPtDate(s.updated_at) + (s.updated_by ? ' por ' + s.updated_by : '') : '—';
@@ -2516,7 +2535,8 @@
       const el = document.getElementById(inputId);
       if (!el) continue;
       const newVal = Number(el.value);
-      const oldVal = Number(engineSettings[dbKey]);
+      const oldRaw = engineSettings[dbKey] != null ? engineSettings[dbKey] : CANONICAL[dbKey];
+      const oldVal = Number(oldRaw);
       const dirty = !isNaN(newVal) && Math.abs(newVal - oldVal) > 1e-9;
       el.classList.toggle('dirty', dirty);
       if (dirty) anyDirty = true;
@@ -2534,7 +2554,23 @@
     payload.notes = document.getElementById('paramNotes').value || null;
     const session = (await sb.auth.getSession()).data.session;
     if (session?.user?.email) payload.updated_by = session.user.email;
-    const { data, error } = await sb.from('engine_settings').upsert(payload).select().single();
+    let { data, error } = await sb.from('engine_settings').upsert(payload).select().single();
+    // Se falhou por colunas em falta (migration ainda não aplicada), tenta sem elas
+    if (error && /column .* does not exist/i.test(error.message || '')) {
+      const fallback = { ...payload };
+      delete fallback.density_rolaria_ton_m3;
+      delete fallback.demand_tolerance_pct;
+      const retry = await sb.from('engine_settings').upsert(fallback).select().single();
+      data = retry.data; error = retry.error;
+      if (!error) {
+        setMotorStatus('warn', '<strong>⚠ Densidade e tolerância NÃO foram guardadas no DB.</strong> Executa a SQL de migration (Motor → secção "Schema") para activar persistência. Por agora os valores ficam apenas em memória.');
+        // Manter valores em memória
+        if (data) {
+          data.density_rolaria_ton_m3 = Number(document.getElementById('paramDensity').value);
+          data.demand_tolerance_pct = Number(document.getElementById('paramDemandTol').value);
+        }
+      }
+    }
     if (error) {
       setMotorStatus('error', '<strong>Falha a guardar:</strong> ' + error.message);
       return;
@@ -2554,7 +2590,7 @@
   }
 
   // Wire UI
-  ['paramKerfDisco','paramKerfFita','paramCap','paramPi','paramRatio','paramPreco','paramNotes'].forEach(id => {
+  ['paramKerfDisco','paramKerfFita','paramCap','paramPi','paramRatio','paramPreco','paramDensity','paramDemandTol','paramNotes'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => { checkMotorDirty(); rerunCalc(); });
   });
@@ -3128,6 +3164,8 @@
     const piVal = Number(engineSettings.pi_value);
     const ratio = Number(engineSettings.ratio_ton_m3);
     const preco = Number(engineSettings.preco_eur_ton);
+    const DENSITY = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
+    const TOL = Math.max(0, Number(engineSettings.demand_tolerance_pct ?? CANONICAL.demand_tolerance_pct)) / 100;
     const demandMap = await loadDemandMap();
 
     // Construir candidatos: para cada tábua detectada, todos os costaneiros (dom + alts + classe=C planeamento)
@@ -3188,8 +3226,11 @@
       }
     });
 
-    // Constraints de demanda (com slack penalizado para feasibility)
+    // Constraints de demanda — banda de tolerância [(1-TOL)·D, (1+TOL)·D]
+    // O LP pode entregar até TOL% acima ou abaixo da demanda nominal.
+    // Slack absorve infeasibility (quando nem (1-TOL)·D é atingível) e está penalizado.
     let nProductsWithDemand = 0;
+    const demandBands = {};  // {prod: {Dmin, D, Dmax}}
     for (const prod of productSet) {
       const key = `dem_${prod}`;
       const someVarHasKey = Object.values(model.variables).some(v => v[key]);
@@ -3197,8 +3238,12 @@
       const D = Number(demandMap.get(prod) || 0);
       if (D <= 0) continue;
       nProductsWithDemand++;
-      model.constraints[key] = { equal: D };
-      // Slack: variable that absorbs shortfall, penalized heavily in objective
+      const Dmin = D * (1 - TOL);
+      const Dmax = D * (1 + TOL);
+      demandBands[prod] = { D, Dmin, Dmax };
+      // Range: min (sem slack faz shortfall infeasible) + max
+      model.constraints[key] = { min: Dmin, max: Dmax };
+      // Slack: absorve quando (1-TOL)·D não é atingível
       const slackName = `slack_${prod}`;
       model.variables[slackName] = { rolaria: 1e6, [key]: 1 };
     }
@@ -3248,12 +3293,14 @@
     const coverageChain = {}; // por produto: { mainSupply, coSupply:[], slack, demand, isLibertado }
     const shortfallMap = {};
     shortfalls.forEach(s => { shortfallMap[s.product] = s.shortfall; });
-    // Inicializar para todos os produtos com demanda
+    // Inicializar para todos os produtos com demanda (com banda de tolerância)
     for (const prod of productSet) {
       const D = Number(demandMap.get(prod) || 0);
       if (D <= 0) continue;
+      const band = demandBands[prod] || { D, Dmin: D, Dmax: D };
       coverageChain[prod] = {
-        demand: D, mainSupply: 0, coSupply: [], slack: shortfallMap[prod] || 0,
+        demand: D, Dmin: band.Dmin, Dmax: band.Dmax,
+        mainSupply: 0, coSupply: [], slack: shortfallMap[prod] || 0,
         isLibertado: false,
       };
     }
@@ -3275,13 +3322,17 @@
         cv.isLibertado = true;
       }
     }
-    // Sanity check: para cada produto, mainSupply + Σ coSupply + slack ≈ demand
+    // Sanity check: para cada produto, mainSupply + Σ coSupply + slack ∈ [Dmin, Dmax]
+    // (deve estar dentro da banda; se cair fora há bug ou infeasibility)
     for (const [prod, cv] of Object.entries(coverageChain)) {
       const totalCo = cv.coSupply.reduce((s, x) => s + x.m3, 0);
       cv.totalCoSupply = totalCo;
-      cv.balance = cv.mainSupply + totalCo + cv.slack - cv.demand;
-      if (Math.abs(cv.balance) > 0.5) {
-        console.warn(`[LP coverage] ${prod}: main=${cv.mainSupply.toFixed(2)} + co=${totalCo.toFixed(2)} + slack=${cv.slack.toFixed(2)} = ${(cv.mainSupply+totalCo+cv.slack).toFixed(2)} vs D=${cv.demand.toFixed(2)} (diff ${cv.balance.toFixed(2)})`);
+      const totalSupply = cv.mainSupply + totalCo + cv.slack;
+      cv.totalSupply = totalSupply;
+      cv.deviationPct = cv.demand > 0 ? ((totalSupply - cv.demand) / cv.demand * 100) : 0;
+      // out-of-band sem slack significar bug; com slack é infeasibility legítima
+      if ((totalSupply < cv.Dmin - 0.5 || totalSupply > cv.Dmax + 0.5) && cv.slack < 0.5) {
+        console.warn(`[LP coverage] ${prod}: supply=${totalSupply.toFixed(2)} fora da banda [${cv.Dmin.toFixed(2)}, ${cv.Dmax.toFixed(2)}]`);
       }
     }
     console.log('[LP coverage chain]', coverageChain);
@@ -3300,16 +3351,16 @@
       totalTabuaAS += demand;
     }
     const ganhoVolumeRolaria = totalRolariaAS - totalRolariaLP;
-    // Conversão m³ rolaria → ton: density pinho fresco ≈ 0.85 ton/m³
-    const DENSITY_ROLARIA = 0.85;
-    const ganhoTon = ganhoVolumeRolaria * DENSITY_ROLARIA;
+    // Conversão m³ rolaria → ton: density configurável (canónico 0.85 pinho fresco)
+    const ganhoTon = ganhoVolumeRolaria * DENSITY;
     const ganhoEur = ganhoTon * preco;
 
     return {
-      candidates, allocations, byTabua, shortfalls, coverageChain,
+      candidates, allocations, byTabua, shortfalls, coverageChain, demandBands,
       totalRolariaAS, totalRolariaLP, ganhoVolumeRolaria, ganhoTon, ganhoEur,
       nProductsWithDemand, nCandidates: candidates.length,
       feasible: result.feasible !== false,
+      tolPct: TOL * 100, density: DENSITY,
     };
   }
 
@@ -3358,8 +3409,9 @@
     let coverageHtml = '';
     if (coverageChain) {
       const wasMainSet = new Set(pairs.map(p => p.tabua));
+      const tolPct = out.tolPct != null ? out.tolPct : 0;
       const coverageRows = Object.entries(coverageChain)
-        .filter(([prod, cv]) => cv.totalCoSupply > 0.5 || cv.slack > 0.5)
+        .filter(([prod, cv]) => cv.totalCoSupply > 0.5 || cv.slack > 0.5 || Math.abs(cv.deviationPct || 0) > 0.5)
         .sort((a, b) => {
           // libertados primeiro, depois por demand desc
           const aLib = a[1].isLibertado ? 0 : 1;
@@ -3371,6 +3423,7 @@
           const mainPct = (cv.mainSupply / cv.demand * 100).toFixed(0);
           const coPct = (cv.totalCoSupply / cv.demand * 100).toFixed(0);
           const slackPct = (cv.slack / cv.demand * 100).toFixed(0);
+          const dev = cv.deviationPct || 0;
           const coDetails = cv.coSupply
             .sort((a, b) => b.m3 - a.m3)
             .map(c => `<span style="white-space:nowrap;"><strong>${c.fromTabua}</strong> → ${fmtNum(c.m3)} m³</span>`)
@@ -3381,9 +3434,14 @@
           const libBadge = cv.isLibertado
             ? `<span class="pill pill-orange" style="margin-left:6px;">libertado</span>`
             : (wasMainSet.has(prod) ? '' : `<span class="pill pill-grey" style="margin-left:6px;">só co-produto</span>`);
+          // Banda + desvio
+          const devColor = Math.abs(dev) < 0.5 ? 'var(--color-text-secondary)'
+            : (dev < 0 ? 'var(--color-orange)' : 'var(--color-blue)');
+          const devStr = `<span style="color:${devColor}; font-size:0.75rem;">${dev >= 0 ? '+' : ''}${dev.toFixed(1)}%</span>`;
           return `<tr>
             <td><strong>${prod}</strong>${libBadge}${slackChip}</td>
-            <td class="num">${fmtNum(cv.demand)}</td>
+            <td class="num">${fmtNum(cv.demand)}<br><span style="font-size:0.7rem; color:var(--color-text-tertiary);">banda [${fmtNum(cv.Dmin)}, ${fmtNum(cv.Dmax)}]</span></td>
+            <td class="num">${fmtNum(cv.totalSupply)} ${devStr}</td>
             <td class="num">${fmtNum(cv.mainSupply)} <span style="color:var(--color-text-secondary); font-size:0.75rem;">(${mainPct}%)</span></td>
             <td class="num">${fmtNum(cv.totalCoSupply)} <span style="color:var(--color-text-secondary); font-size:0.75rem;">(${coPct}%)</span></td>
             <td>${coDetails || '<span style="color:var(--color-text-tertiary);">—</span>'}</td>
@@ -3393,17 +3451,18 @@
         coverageHtml = `
         <details style="margin-top:16px;" open>
           <summary style="cursor:pointer; font-weight:600; font-size:0.9rem; padding:8px 0;">
-            🔗 Cadeia de cobertura — demanda dos libertados / costaneiros
+            🔗 Cadeia de cobertura — banda de demanda ±${tolPct.toFixed(1)}%
           </summary>
           <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-bottom:8px;">
-            Para cada produto cuja demanda é parcial ou totalmente coberta por co-produção: <strong>main</strong> = produzido como tábua principal, <strong>co</strong> = produzido como costaneiro de outras tábuas. Se aparecer <span class="pill pill-red">falta</span>, o LP não conseguiu satisfazer a demanda — esse défice é deduzido da poupança.
+            O LP pode entregar entre <strong>(1−${tolPct.toFixed(0)}%)·D</strong> e <strong>(1+${tolPct.toFixed(0)}%)·D</strong> de cada produto. Coluna <strong>Total entregue</strong> mostra a soma main+co+slack e o desvio % vs. demanda nominal. Se aparecer <span class="pill pill-red">falta</span> o LP nem o limite inferior conseguiu cumprir — esse défice é deduzido da poupança.
           </div>
           <div class="table-wrap">
             <table class="data">
               <thead>
                 <tr>
                   <th>Produto</th>
-                  <th class="num">Demanda (m³/ano)</th>
+                  <th class="num">Demanda nominal</th>
+                  <th class="num">Total entregue</th>
                   <th class="num">Como main</th>
                   <th class="num">Como co-produto</th>
                   <th>Origem do co-produto</th>
@@ -3440,7 +3499,7 @@
       </div>
       ${coverageHtml}
       <div class="banner banner-info" style="margin-top:16px; font-size:0.8125rem;">
-        ✓ <strong>LP global coordenado:</strong> sem double-counting da demanda. Costaneiros co-produzidos somam para a sua demanda total (entre todas as tábuas). <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
+        ✓ <strong>LP global coordenado:</strong> sem double-counting da demanda. Banda de tolerância <strong>±${(out.tolPct||0).toFixed(1)}%</strong> activa por produto · densidade rolaria <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>. <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
       </div>
     `;
 
@@ -3503,9 +3562,8 @@
       const asRolariaM3 = asK * D_T;
       const lpRolariaM3 = grp.allocations.reduce((s, a) => s + a.K * a.volume, 0);
       const savedRolariaM3 = asRolariaM3 - lpRolariaM3;
-      // Conversão para ton: density rolaria ≈ 0.85 ton/m³ (pinho fresco, típico sawmill PT)
-      // Validação cruzada com rácio canónico: 2.13 = density/aprov_avg ≈ 0.85/0.40
-      const DENSITY_ROLARIA = 0.85;
+      // Conversão para ton: density configurável (canónico 0.85 pinho fresco)
+      const DENSITY_ROLARIA = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
       const savedTon = savedRolariaM3 * DENSITY_ROLARIA;
       const savedEur = savedTon * preco;
 
@@ -3581,7 +3639,7 @@
       // Calcular slack penalty: rolaria que precisaria para produzir o slack dos libertados
       let libertadoSlackPenalty = 0;
       const libertadoSlackInfo = [];
-      const DENSITY_ROL = 0.85;  // consistente com global
+      const DENSITY_ROL = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
       libertados.forEach(lib => {
         const slack = slackByTabua[lib] || 0;
         if (slack > 0.5) {
