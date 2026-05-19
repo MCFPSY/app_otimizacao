@@ -2573,45 +2573,56 @@
     const areaMainTotal = N_main * W * H;
     const xMainRight = (N_main * H + (N_main - 1) * kerf_d) / 2;
 
+    function fitInStrip(availW, cw) {
+      if (availW <= 0) return 0;
+      return Math.max(0, Math.floor((availW + kerf_f) / (cw + kerf_f)));
+    }
+
     // === TOP / BOTTOM COSTANEIROS ===
-    // Cada row = UM costaneiro centrado horizontalmente, w wide × h thick.
-    // Stack ao longo de y: row k está acima de row k-1.
-    // Constraint: corner top-right (w/2, yTop) deve estar no círculo.
+    // Folha5 confirma: cada row pode ter MÚLTIPLOS costaneiros lado-a-lado (até o chord o permitir).
+    // Stack vertical de rows. CAP = total de costaneiros nesta região (TOP isolado, BOTTOM isolado).
     function packTopBottom() {
       let yPrev = W / 2;
       let count = 0;
-      for (let k = 0; k < cap; k++) {
+      for (let k = 0; k < 20 && count < cap; k++) {
         const yBot = yPrev + kerf_d;
         const yTop = yBot + h;
-        if ((w/2)*(w/2) + yTop*yTop > R*R) break;
-        count++;
+        if (yTop > R) break;
+        const chord = 2 * Math.sqrt(R*R - yTop*yTop);
+        const nRaw = fitInStrip(chord, w);
+        if (nRaw <= 0) break;
+        const allowed = Math.min(nRaw, cap - count);
+        count += allowed;
         yPrev = yTop;
       }
       return count;
     }
 
     // === LEFT / RIGHT COSTANEIROS ===
-    // Cada "coluna" = UM costaneiro centrado verticalmente.
-    // Tenta DUAS orientações; pick best:
-    //   - vertical: cost h wide × w tall (long axis perpendicular ao stack)
-    //   - horizontal: cost w wide × h tall (long axis paralelo ao stack)
-    // Stack ao longo de x à direita do bloco principal.
+    // Strip vertical à direita do bloco principal. Tenta ambas orientações; pick best.
+    // - vertical: cost h wide (horizontal) × w tall (vertical) — long axis paralelo ao chord vertical
+    // - horizontal: cost w wide × h tall
+    // Cada strip à direita pode ter múltiplos cost stacked verticalmente (se chord_v suporta).
     function packLR(cw, ch) {
       let xPrev = xMainRight;
       let count = 0;
-      for (let k = 0; k < cap; k++) {
+      for (let k = 0; k < 5 && count < cap; k++) {
         const xLeft = xPrev + kerf_d;
         const xRight = xLeft + cw;
-        if (xRight*xRight + (ch/2)*(ch/2) > R*R) break;
-        count++;
+        if (xRight > R) break;
+        const chordVert = 2 * Math.sqrt(R*R - xRight*xRight);
+        const nRaw = fitInStrip(chordVert, ch);
+        if (nRaw <= 0) break;
+        const allowed = Math.min(nRaw, cap - count);
+        count += allowed;
         xPrev = xRight;
       }
       return count;
     }
 
     const TOP = packTopBottom();  // BOTTOM é igual por simetria
-    const LR_vertical   = packLR(h, w);  // cost 14×70 → 14 wide, 70 tall
-    const LR_horizontal = packLR(w, h);  // cost 70×14 → 70 wide, 14 tall
+    const LR_vertical   = packLR(h, w);  // cost h wide, w tall (rotado)
+    const LR_horizontal = packLR(w, h);  // cost w wide, h tall (normal)
     const LR = Math.max(LR_vertical, LR_horizontal);
 
     const totalCostaneiros = 2 * TOP + 2 * LR;
