@@ -3149,7 +3149,11 @@
       for (const costName of allCosts) {
         const cost = parseRefDim(costName);
         if (!cost || !cost.length || cost.length !== tab.length) continue;
-        // CRÍTICO: usar média sobre todos os Ø dentro da gama, não único midpoint
+        // CONSTRAINT OPERACIONAL: costaneiro tem de ser:
+        // - mais ESTREITO que a tábua principal (cost.W < tab.W)
+        // - dentro do range típico de costaneiros (cost.W ≤ 100 mm)
+        // Caso contrário é uma tábua principal, não costaneiro
+        if (cost.W >= tab.W || cost.W > 100) continue;
         const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
         if (r.error || r.avgN_main === 0) continue;
         candidates.push({
@@ -3374,14 +3378,23 @@
     candidatos.sort((a, b) => b.savedEur - a.savedEur);
     const top3 = candidatos.slice(0, 3);
 
-    // Quem produz este cost como co-produto? Procurar em todas as allocations
+    // Quem produz este cost como co-produto? Inclui também o AS-IS dominante deles (cadeia)
     function findCoProducers(targetCost) {
       const producers = [];
       for (const [otherTabua, otherGrp] of Object.entries(lpOut.byTabua)) {
         if (otherTabua === targetCost) continue;
         const alloc = otherGrp.allocations.find(a => a.cost === targetCost);
         if (alloc && alloc.volume > 0.5) {
-          producers.push({ tabua: otherTabua, volume: alloc.volume, coRatio: alloc.coRatio });
+          const upPair = pairs.find(pp => pp.tabua === otherTabua);
+          const upAsIs = upPair ? upPair.dominant_costaneiro : null;
+          producers.push({
+            tabua: otherTabua,
+            volume: alloc.volume,
+            coRatio: alloc.coRatio,
+            coProducedVolume: alloc.volume * alloc.coRatio,
+            wasUsingCost: upAsIs,
+            switchedFrom: upAsIs !== targetCost,
+          });
         }
       }
       return producers;
@@ -3400,12 +3413,21 @@
     if (totalEl) totalEl.innerHTML = `<strong>Top 3: ${fmtNum(totalSavedTon)} ton/ano · €${fmtNum(totalSavedEur)}/ano</strong>`;
     const cards = top3.map((rec, i) => {
       const producers = findCoProducers(rec.tabua);
+      // Identificar costaneiros antigos que ficam libertos (eram dominantes destes producers)
+      const libertados = new Set();
+      producers.forEach(p => { if (p.switchedFrom && p.wasUsingCost) libertados.add(p.wasUsingCost); });
       const producersHtml = producers.length === 0
         ? '<em style="color:var(--color-text-secondary);">Nenhum (ver Vista LP completa)</em>'
         : producers.slice(0, 5).map(p => {
-            const coProduced = p.volume * p.coRatio;
-            return `<div style="margin-top:4px;">• <strong>${p.tabua}</strong> (produz ${fmtNum(coProduced)} m³ como co-produto)</div>`;
+            const switchNote = p.switchedFrom
+              ? `<small style="color:var(--color-text-secondary);">(antes usava <strong>${p.wasUsingCost}</strong> como cost dominante)</small>`
+              : `<small style="color:var(--color-text-secondary);">(já usava ${rec.tabua})</small>`;
+            return `<div style="margin-top:4px;">• <strong>${p.tabua}</strong> produz ${fmtNum(p.coProducedVolume)} m³ ${switchNote}</div>`;
           }).join('');
+      const libertadosHtml = libertados.size === 0 ? '' : `
+        <div style="margin-top:10px; padding:8px 10px; background:#FFF9E6; border-left:3px solid var(--color-orange); border-radius:6px; font-size:0.8rem;">
+          ⚠ <strong>Costaneiros libertados:</strong> ${[...libertados].join(', ')} — estes ficam sem este fornecedor; a demanda deles é redistribuída noutras tábuas (ver Vista LP completa para detalhes).
+        </div>`;
       return `
         <div style="background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:20px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; gap:12px;">
@@ -3438,6 +3460,7 @@
           <div style="margin-top:14px; padding:10px 14px; background:var(--color-blue-light); border-radius:var(--radius-sm); font-size:0.85rem;">
             <strong style="color:var(--color-blue);">🔗 Quem fornece como co-produto:</strong>
             <div style="margin-top:4px;">${producersHtml}</div>
+            ${libertadosHtml}
           </div>
         </div>`;
     }).join('');
