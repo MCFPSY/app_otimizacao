@@ -2567,62 +2567,52 @@
     const areaCost = w * h;
 
     // === N MAIN TÁBUAS (paralelas verticais) ===
-    // Geometria correcta (revelada pelo esquema CAD do user):
-    // N tábuas verticais paralelas: H wide × W tall cada
-    // Stack horizontal: (N·H + (N-1)·kerf_d) ≤ 2·√(R²-(W/2)²)
     const maxChordAtMainTop = 2 * Math.sqrt(R*R - (W/2)*(W/2));
     const N_main = Math.floor((maxChordAtMainTop + kerf_d) / (H + kerf_d));
     if (N_main < 1) return { error: 'Nenhuma tábua principal cabe' };
     const areaMainTotal = N_main * W * H;
     const xMainRight = (N_main * H + (N_main - 1) * kerf_d) / 2;
 
-    function fitInStrip(availW, cw) {
-      if (availW <= 0) return 0;
-      return Math.max(0, Math.floor((availW + kerf_f) / (cw + kerf_f)));
-    }
-
-    // === TOP COSTANEIROS (y > W/2 + kerf_d) ===
-    // Stack horizontal rows acima do bloco de tábuas principais
-    // Cap = total de costaneiros nesta região (TOP) — operacional
-    function packTopBottom(cw, ch) {
-      let yPrev = W / 2;  // topo do bloco principal
+    // === TOP / BOTTOM COSTANEIROS ===
+    // Cada row = UM costaneiro centrado horizontalmente, w wide × h thick.
+    // Stack ao longo de y: row k está acima de row k-1.
+    // Constraint: corner top-right (w/2, yTop) deve estar no círculo.
+    function packTopBottom() {
+      let yPrev = W / 2;
       let count = 0;
-      for (let k = 0; k < 20 && count < cap; k++) {
+      for (let k = 0; k < cap; k++) {
         const yBot = yPrev + kerf_d;
-        const yTop = yBot + ch;
-        if (yTop > R) break;
-        const chord = 2 * Math.sqrt(R*R - yTop*yTop);
-        const nRaw = fitInStrip(chord, cw);
-        if (nRaw <= 0) break;
-        const allowed = Math.min(nRaw, cap - count);
-        count += allowed;
+        const yTop = yBot + h;
+        if ((w/2)*(w/2) + yTop*yTop > R*R) break;
+        count++;
         yPrev = yTop;
       }
       return count;
     }
 
-    // === LEFT/RIGHT COSTANEIROS (na ponta curva, x > xMainRight) ===
-    // Tipicamente este espaço é estreito demais para caber costaneiros
-    function packLeftRight(cw, ch) {
+    // === LEFT / RIGHT COSTANEIROS ===
+    // Cada "coluna" = UM costaneiro centrado verticalmente.
+    // Tenta DUAS orientações; pick best:
+    //   - vertical: cost h wide × w tall (long axis perpendicular ao stack)
+    //   - horizontal: cost w wide × h tall (long axis paralelo ao stack)
+    // Stack ao longo de x à direita do bloco principal.
+    function packLR(cw, ch) {
       let xPrev = xMainRight;
       let count = 0;
-      for (let k = 0; k < 5 && count < cap; k++) {
+      for (let k = 0; k < cap; k++) {
         const xLeft = xPrev + kerf_d;
-        const xRight = xLeft + ch;
-        if (xRight > R) break;
-        const chordVert = 2 * Math.sqrt(R*R - xRight*xRight);
-        const nRaw = fitInStrip(chordVert, cw);
-        if (nRaw <= 0) break;
-        const allowed = Math.min(nRaw, cap - count);
-        count += allowed;
+        const xRight = xLeft + cw;
+        if (xRight*xRight + (ch/2)*(ch/2) > R*R) break;
+        count++;
         xPrev = xRight;
       }
       return count;
     }
 
-    // Tentar ambas orientações; pick best
-    const TOP = Math.max(packTopBottom(w, h), packTopBottom(h, w));
-    const LR  = Math.max(packLeftRight(w, h), packLeftRight(h, w));
+    const TOP = packTopBottom();  // BOTTOM é igual por simetria
+    const LR_vertical   = packLR(h, w);  // cost 14×70 → 14 wide, 70 tall
+    const LR_horizontal = packLR(w, h);  // cost 70×14 → 70 wide, 14 tall
+    const LR = Math.max(LR_vertical, LR_horizontal);
 
     const totalCostaneiros = 2 * TOP + 2 * LR;
     const areaWood = areaMainTotal + totalCostaneiros * areaCost;
