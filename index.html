@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#007AFF">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/javascript-lp-solver@0.4.24/prod/solver.js"></script>
 <style>
   :root {
     --color-white: #FFFFFF;
@@ -1269,11 +1270,23 @@
     <h2 class="section-title">Combinações</h2>
     <p class="section-subtitle">Output #1 do modelo: para cada referência produzida, o corte concreto recomendado.</p>
 
-    <!-- Marco 5.4: Recomendações TO-BE (algoritmo v1) -->
-    <div class="panel panel-accent-blue" id="toBePanel" style="border-left:4px solid var(--color-blue);">
+    <!-- Marco 6 Fase A: LP Global (coordena cross-tábua, sem double-count) -->
+    <div class="panel" id="lpPanel" style="border-left:4px solid var(--color-green); background: linear-gradient(to right, rgba(52,199,89,0.04), transparent);">
       <div class="panel-header">
         <div>
-          <div class="panel-title">💡 Recomendações TO-BE — melhor costaneiro alternativo</div>
+          <div class="panel-title">🧮 LP Global (Marco 6 — Fase A) — recomendações coordenadas cross-tábua</div>
+          <div class="panel-subtitle">Linear Programming: minimiza ton rolaria global respeitando <strong>demanda tábuas + demanda costaneiros + length match</strong>. Sem double-counting da demanda. <strong>Triagem e compra ainda não optimizadas</strong> (Fases B+C — próximas iterações).</div>
+        </div>
+        <span class="pill pill-green" id="lpTotal">A calcular...</span>
+      </div>
+      <div id="lpContent" style="margin-top:8px;">A construir modelo LP...</div>
+    </div>
+
+    <!-- Marco 5.4: Recomendações TO-BE (algoritmo greedy — não-coordenado) -->
+    <div class="panel panel-accent-blue" id="toBePanel" style="border-left:4px solid var(--color-blue); opacity:0.85;">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">💡 Recomendações TO-BE — greedy per-tábua <span style="font-size:0.75rem; color:var(--color-text-tertiary); font-weight:400;">(referência — substituído pelo LP acima)</span></div>
           <div class="panel-subtitle">Para cada par actual (AS-IS), testa candidatos do <strong>mesmo comprimento</strong> da tábua (constraint operacional: tábua e costaneiros vêm do mesmo tronco → mesmo comprimento) e propõe o costaneiro com melhor aproveitamento para a mesma tábua + gama Ø. Ordenado por €/ano.</div>
         </div>
         <span class="pill pill-blue" id="toBeTotal">—</span>
@@ -2998,6 +3011,234 @@
   let cachedProducaoRows = null;
   let lastDetectedPairs = null;
 
+  // ===== Marco 6 Fase A: LP Global =====
+  //
+  // Variáveis: x_i ≥ 0 para cada par (tábua, costaneiro) viável
+  //   onde length(tábua) == length(costaneiro) e geometricamente válido (calcAproveitamento OK)
+  //   tábua usa a gama Ø dominante (fixo nesta fase A)
+  //
+  // Objectivo: minimizar Σ x_i × K_i  onde K_i = area_circle / (N_main × area_tábua) por par
+  //   (= ton rolaria por unit volume de tábua produzida nesse par)
+  //
+  // Constraints (= equality para evitar over/under, com slack para feasibility):
+  //   Para cada produto p com demanda D_p no Planeamento:
+  //     Σ_{i: tábua_i=p} x_i + Σ_{i: cost_i=p} x_i × co_ratio_i = D_p
+  //   (= contribuições como main + como co-produto = demanda)
+  //
+  // Slack variables com penalidade alta absorvem demanda não satisfeita
+  //
+  async function computeLPGlobal(pairs) {
+    if (!engineSettings || !pairs || pairs.length === 0) return null;
+    if (typeof solver === 'undefined') return { error: 'LP solver não carregou (CDN)' };
+    const kerf_d = Number(engineSettings.kerf_disco_mm);
+    const kerf_f = Number(engineSettings.kerf_fita_mm);
+    const cap = Number(engineSettings.cap_costaneiros);
+    const piVal = Number(engineSettings.pi_value);
+    const ratio = Number(engineSettings.ratio_ton_m3);
+    const preco = Number(engineSettings.preco_eur_ton);
+    const demandMap = await loadDemandMap();
+
+    // Construir candidatos: para cada tábua detectada, todos os costaneiros (dom + alts)
+    // que sejam length-matched e geometricamente OK
+    const candidates = [];
+    const allCosts = new Set();
+    pairs.forEach(p => {
+      [p.dominant_costaneiro, ...p.alternatives.map(a => a.costaneiro)].forEach(c => allCosts.add(c));
+    });
+    for (const p of pairs) {
+      const tab = parseRefDim(p.tabua);
+      const D = gamaToD(p.gama_dominante);
+      if (!tab || !D || !tab.length) continue;
+      for (const costName of allCosts) {
+        const cost = parseRefDim(costName);
+        if (!cost || !cost.length || cost.length !== tab.length) continue;
+        const r = calcAproveitamento(D, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
+        if (r.error) continue;
+        // K = ton de rolaria por unit volume de tábua produzida nesta combinação
+        // = area_circle / (N_main × area_tábua) — assumindo densidades uniformes
+        const K = r.areaCircle / (r.n.main * tab.W * tab.H);
+        const coRatio = r.n.total * (cost.W * cost.H) / (r.n.main * tab.W * tab.H);
+        candidates.push({
+          tabua: p.tabua, cost: costName, aprov: r.aproveitamento,
+          coRatio, K, gama: p.gama_dominante,
+        });
+      }
+    }
+    if (candidates.length === 0) return { error: 'Nenhum candidato viável' };
+
+    // Conjunto de produtos com demanda relevante
+    // Produtos relevantes: tábuas (P) detectadas + costaneiros (qualquer ref usada como C)
+    const productSet = new Set();
+    candidates.forEach(c => { productSet.add(c.tabua); productSet.add(c.cost); });
+
+    // Construir modelo LP
+    const model = {
+      optimize: 'rolaria', opType: 'min',
+      constraints: {}, variables: {},
+    };
+
+    candidates.forEach((c, i) => {
+      const v = `x_${i}`;
+      model.variables[v] = { rolaria: c.K };
+      // Contribui como MAIN para a demanda da tábua
+      const tKey = `dem_${c.tabua}`;
+      model.variables[v][tKey] = (model.variables[v][tKey] || 0) + 1;
+      // Se cost também tem demanda no Planeamento, contribui como co-produto
+      if (demandMap.has(c.cost)) {
+        const cKey = `dem_${c.cost}`;
+        model.variables[v][cKey] = (model.variables[v][cKey] || 0) + c.coRatio;
+      }
+    });
+
+    // Constraints de demanda (com slack penalizado para feasibility)
+    let nProductsWithDemand = 0;
+    for (const prod of productSet) {
+      const key = `dem_${prod}`;
+      const someVarHasKey = Object.values(model.variables).some(v => v[key]);
+      if (!someVarHasKey) continue;
+      const D = Number(demandMap.get(prod) || 0);
+      if (D <= 0) continue;
+      nProductsWithDemand++;
+      model.constraints[key] = { equal: D };
+      // Slack: variable that absorbs shortfall, penalized heavily in objective
+      const slackName = `slack_${prod}`;
+      model.variables[slackName] = { rolaria: 1e6, [key]: 1 };
+    }
+
+    // Resolver
+    let result;
+    try {
+      result = solver.Solve(model);
+    } catch (err) {
+      return { error: 'LP solver falhou: ' + err.message };
+    }
+
+    // Extrair solução: para cada candidato, quanto foi atribuído
+    const allocations = [];
+    const shortfalls = [];
+    for (const [name, val] of Object.entries(result)) {
+      if (name === 'feasible' || name === 'result' || name === 'bounded') continue;
+      if (typeof val !== 'number' || val < 0.01) continue;
+      if (name.startsWith('x_')) {
+        const idx = Number(name.slice(2));
+        allocations.push({ ...candidates[idx], volume: val });
+      } else if (name.startsWith('slack_')) {
+        shortfalls.push({ product: name.slice(6), shortfall: val });
+      }
+    }
+    // Agrupar por tábua
+    const byTabua = {};
+    allocations.forEach(a => {
+      if (!byTabua[a.tabua]) byTabua[a.tabua] = { allocations: [], totalVolume: 0 };
+      byTabua[a.tabua].allocations.push(a);
+      byTabua[a.tabua].totalVolume += a.volume;
+    });
+    // Calcular weighted aprov por tábua
+    for (const t of Object.keys(byTabua)) {
+      const grp = byTabua[t];
+      grp.weightedAprov = grp.allocations.reduce((s, a) => s + a.aprov * a.volume, 0) / grp.totalVolume;
+    }
+    // Total rolaria optimal
+    const totalRolariaLP = allocations.reduce((s, a) => s + a.K * a.volume, 0);
+
+    // AS-IS rolaria para comparar: usa o dominant_costaneiro de cada pair
+    let totalRolariaAS = 0;
+    let totalTabuaAS = 0;
+    for (const p of pairs) {
+      const tab = parseRefDim(p.tabua);
+      const cost = parseRefDim(p.dominant_costaneiro);
+      const D = gamaToD(p.gama_dominante);
+      if (!tab || !cost || !D || !tab.length || cost.length !== tab.length) continue;
+      const r = calcAproveitamento(D, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
+      if (r.error) continue;
+      const K = r.areaCircle / (r.n.main * tab.W * tab.H);
+      const demand = Number(demandMap.get(p.tabua) || 0);
+      totalRolariaAS += K * demand;
+      totalTabuaAS += demand;
+    }
+    const ganhoVolumeRolaria = totalRolariaAS - totalRolariaLP;
+    const ganhoTon = ganhoVolumeRolaria * ratio;  // converter via rácio
+    const ganhoEur = ganhoTon * preco;
+
+    return {
+      candidates, allocations, byTabua, shortfalls,
+      totalRolariaAS, totalRolariaLP, ganhoVolumeRolaria, ganhoTon, ganhoEur,
+      nProductsWithDemand, nCandidates: candidates.length,
+      feasible: result.feasible !== false,
+    };
+  }
+
+  async function renderLP(pairs) {
+    const el = document.getElementById('lpContent');
+    const totalEl = document.getElementById('lpTotal');
+    if (!el) return;
+    const out = await computeLPGlobal(pairs);
+    if (!out) { el.innerHTML = '<div class="empty-state" style="padding:24px;"><p>Aguarda dados.</p></div>'; return; }
+    if (out.error) {
+      el.innerHTML = `<div class="banner banner-error"><strong>Erro LP:</strong> ${out.error}</div>`;
+      if (totalEl) totalEl.textContent = 'erro';
+      return;
+    }
+    const { byTabua, shortfalls, ganhoTon, ganhoEur, nCandidates, nProductsWithDemand, feasible } = out;
+    if (totalEl) {
+      totalEl.innerHTML = feasible
+        ? `<strong>Ganho LP: ${fmtNum(ganhoTon)} ton/ano · €${fmtNum(ganhoEur)}/ano</strong>`
+        : `<strong style="color:var(--color-orange)">LP infeasible</strong>`;
+    }
+
+    const tabuaRows = Object.entries(byTabua)
+      .sort((a, b) => b[1].totalVolume - a[1].totalVolume)
+      .slice(0, 20)
+      .map(([tabua, grp]) => {
+        const allocsHtml = grp.allocations
+          .sort((a, b) => b.volume - a.volume)
+          .map(a => {
+            const pct = (a.volume / grp.totalVolume * 100).toFixed(0);
+            return `<span style="white-space:nowrap;"><strong>${a.cost}</strong> ${pct}%</span>`;
+          }).join(' · ');
+        return `<tr>
+          <td><strong>${tabua}</strong></td>
+          <td class="num">${fmtNum(grp.totalVolume)}</td>
+          <td>${allocsHtml}</td>
+          <td class="num">${(grp.weightedAprov*100).toFixed(1)}%</td>
+        </tr>`;
+      }).join('');
+
+    const shortfallHtml = shortfalls.length === 0
+      ? '<span style="color:var(--color-green); font-weight:600;">✓ Todas as demandas satisfeitas</span>'
+      : `<div class="banner banner-warn" style="margin-top:8px;"><strong>⚠ Shortfalls:</strong> ${shortfalls.map(s => `${s.product} (${fmtNum(s.shortfall)})`).join(', ')}</div>`;
+
+    el.innerHTML = `
+      <div style="margin-bottom:12px; font-size:0.875rem;">
+        Modelo LP: <strong>${nCandidates}</strong> variáveis (pares t×c viáveis) · <strong>${nProductsWithDemand}</strong> constraints de demanda
+        <br>
+        ${shortfallHtml}
+        <br>
+        <strong style="color:var(--color-green); font-size:1.05rem;">Ganho global coordenado: ${fmtNum(ganhoTon)} ton/ano ≈ €${fmtNum(ganhoEur)}/ano</strong>
+        <span style="color:var(--color-text-secondary);"> (vs. AS-IS dominante)</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Tábua (P)</th>
+              <th class="num">Volume (m³/ano)</th>
+              <th>Mix óptimo de costaneiros (LP)</th>
+              <th class="num">Aprov ponderado</th>
+            </tr>
+          </thead>
+          <tbody>${tabuaRows}</tbody>
+        </table>
+      </div>
+      <div class="banner banner-info" style="margin-top:16px; font-size:0.8125rem;">
+        ✓ <strong>LP global coordenado:</strong> sem double-counting da demanda. Costaneiros co-produzidos somam para a sua demanda total (entre todas as tábuas). <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
+      </div>
+    `;
+
+    // Substituir Dashboard hero pelo número LP (mais defensável)
+    if (feasible) applyToBeToDashboard(ganhoTon, ganhoEur);
+  }
+
   async function refreshParesReais() {
     if (!cachedProducaoRows) cachedProducaoRows = await loadAllProducaoForPares();
     const periodEl = document.getElementById('paresPeriod');
@@ -3005,8 +3246,9 @@
     const { pairs, nTurnos, nDescartados } = detectParesReais(cachedProducaoRows, period);
     lastDetectedPairs = pairs;
     renderParesReais(pairs, nTurnos, nDescartados);
-    // Marco 5.4: TO-BE depois do AS-IS
     renderToBe(pairs);
+    // Marco 6 Fase A: LP global
+    renderLP(pairs);
   }
 
   // ===== Marco 5.4 v2: TO-BE com balanço de demanda (princípio crítico das Premissas) =====
