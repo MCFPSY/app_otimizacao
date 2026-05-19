@@ -2527,91 +2527,107 @@
   // Validação contra mockup (800×145×22 + 95×14 + Ø195 ≈ 54.6%): mostrado no UI.
   //
   function calcAproveitamento(D, W, H, w, h, kerf_d, kerf_f, cap, piVal) {
-    // Validações geométricas
+    // === Algoritmo v2 — packing geométrico melhorado ===
+    // Diferenças vs v1:
+    //   - Tenta AMBAS orientações de costaneiro em TOP/BOTTOM e LEFT/RIGHT (escolhe a melhor)
+    //   - LEFT/RIGHT respeita constraint: strip vertical não pode sobrepor tábua principal
+    //     (split em 2 metades: acima e abaixo do main rect)
+    //   - Adiciona MIDDLE: tenta encaixar 1 costaneiro em cada uma das 4 esquinas (top-right,
+    //     top-left, bottom-right, bottom-left), adjacentes ao vértice da tábua principal,
+    //     em ambas orientações. Limita ao espaço NÃO ocupado pelos strips TOP/BOTTOM/LR.
+    //
+    // Ainda em falta para parity total com Folha5:
+    //   - Costaneiros secundários de dimensões diferentes (Folha5 mistura tamanhos)
+    //   - Optimização global do trade-off entre regiões
+    //
     const PI = piVal || Math.PI;
     if (D <= 0 || W <= 0 || H <= 0 || w <= 0 || h <= 0) {
       return { error: 'Dimensões têm de ser positivas' };
     }
     const R = D / 2;
-    // Tábua principal centrada — verifica se cabe no círculo
     const diagSq = (W/2)**2 + (H/2)**2;
     if (diagSq > R*R) {
-      return { error: `Tábua ${W}×${H} não cabe em Ø${D} (diagonal/2 = ${Math.sqrt(diagSq).toFixed(1)} > ${R})` };
+      return { error: `Tábua ${W}×${H} não cabe em Ø${D}` };
     }
     const areaCircle = PI * R * R;
     const areaMain = W * H;
+    const areaCost = w * h;
 
-    // Função: quantos costaneiros de largura `cw` cabem numa strip de largura disponível `availW`
-    // entre extremos curvos, com kerf_fita entre adjacentes
     function fitInStrip(availW, cw) {
       if (availW <= 0) return 0;
-      // Modelo: (cw + kerf_f) × n - kerf_f <= availW  → n <= (availW + kerf_f) / (cw + kerf_f)
       const n = Math.floor((availW + kerf_f) / (cw + kerf_f));
       return Math.max(0, n);
     }
 
-    // TOP region: empilhar strips de costaneiros (w largo, h alto)
-    // Cada strip tem topo em y_top; chord do círculo a essa altura define availW
-    function packVertical(W_main, H_main, cw, ch, capN) {
-      let yTopMain = H_main / 2;
+    // TOP/BOTTOM packing: strips horizontais acima/abaixo. Costaneiro com larg=cw, esp=ch.
+    function packTopBottom(cw, ch) {
+      let yPrev = H / 2;
       let count = 0;
-      const stripCounts = [];
-      for (let k = 0; k < capN; k++) {
-        const yBot = yTopMain + kerf_d;            // gap entre tábua/strip anterior e nova
+      for (let k = 0; k < cap; k++) {
+        const yBot = yPrev + kerf_d;
         const yTop = yBot + ch;
-        if (yTop > R) { stripCounts.push({ row: k+1, fits: false, reason: 'strip além do círculo' }); break; }
-        // Chord no TOPO da strip (ponto mais estreito da strip dentro do círculo)
+        if (yTop > R) break;
         const chord = 2 * Math.sqrt(R*R - yTop*yTop);
         const n = fitInStrip(chord, cw);
-        stripCounts.push({ row: k+1, yTop, chord, n });
+        if (n <= 0) break;
         count += n;
-        if (n === 0) break;  // se não cabe nenhum, parar (proximos também não)
-        yTopMain = yTop;
+        yPrev = yTop;
       }
-      return { count, strips: stripCounts };
+      return count;
     }
 
-    const top = packVertical(W, H, w, h, cap);
-    // BOTTOM simétrico ao TOP
-    const bottomCount = top.count;
+    // LEFT/RIGHT packing: strip à direita do main rect (com fita kerf entre).
+    // Strip tem largura horizontal ch (espessura do costaneiro), e o costaneiro ocupa altura cw.
+    // CONSTRAINT: strip não pode sobrepor o main rect → altura útil é dividida em 2 metades
+    // (acima e abaixo do main rect).
+    function packLeftRight(cw, ch) {
+      let xPrev = W / 2;
+      let count = 0;
+      for (let k = 0; k < cap; k++) {
+        const xLeft = xPrev + kerf_d;
+        const xRight = xLeft + ch;
+        if (xRight > R) break;
+        const halfChord = Math.sqrt(R*R - xRight*xRight);  // chord vertical / 2
+        // Altura útil em metade superior (excluindo main rect + kerf)
+        const partHeight = halfChord - H/2 - kerf_d;
+        if (partHeight <= 0) break;
+        const nPerHalf = fitInStrip(partHeight, cw);
+        const n = 2 * nPerHalf;  // top half + bottom half (simétrico)
+        if (n <= 0) break;
+        count += n;
+        xPrev = xRight;
+      }
+      return count;
+    }
 
-    // LEFT/RIGHT: rotar costaneiro 90° (h fica horizontal, w fica vertical)
-    // Reusar packVertical mas com (Wmain=H, Hmain=W, cw=w, ch=h) — interpretando o círculo igual
-    // mas trocando eixos. A função pega yTop=H/2 e empilha para "cima"; agora "cima" = "direita"
-    // do círculo original. cw é a dimensão paralela ao chord (era w → continua w, comprida).
-    // ch é a dimensão "perpendicular" empilhada (era h → continua h, fina).
-    // MAS a forma muda: agora o costaneiro encara-se com h como "largura horizontal no espaço left/right"
-    // e w como "altura vertical". Portanto cw=w, ch=h não muda — o que muda é a orientação do main rect.
-    const right = packVertical(H, W, w, h, cap);
-    // Esperar... isto não está bem. Re-pensar:
-    // No RIGHT region, o "chord vertical" do círculo à direita do main rect é a "largura disponível".
-    // O costaneiro fica em pé (w como altura, h como largura). A "strip vertical" tem:
-    //   - largura horizontal = h (espessura do costaneiro)
-    //   - altura vertical = limitada pelo chord vertical do círculo a essa coordenada x
-    // Então: x_right_main = W/2. Primeira strip ocupa x in [W/2+kerf_d, W/2+kerf_d+h].
-    //   No x mais à direita da strip (x = W/2+kerf_d+h), a chord vertical do círculo é:
-    //     chord_v = 2*sqrt(R²-x²)
-    //   Quantos costaneiros (cada com altura w) cabem em chord_v com kerf_f entre eles:
-    //     n = floor((chord_v + kerf_f) / (w + kerf_f))
-    //
-    // Esta lógica é exactamente packVertical com (Wmain=W, Hmain=H trocados, cw=w, ch=h) MAS o
-    // "Hmain/2" inicial usado no packVertical era do main na direcção empilhamento. Agora o
-    // "empilhamento" é horizontal (a partir de W/2), e o costaneiro fica "alto", então:
-    //   - posição inicial yTopMain → xRightMain = W/2
-    //   - kerf_d entre tábua e strip
-    //   - ch = h (largura horizontal do costaneiro na strip)
-    //   - cw = w (altura vertical → este é o cw para fitInStrip)
-    // Portanto chamamos packVertical(W_main=any unused, H_main=W, cw=w, ch=h) onde H_main define metade do começo
-    // O packVertical usa yTopMain = H_main/2 = W/2 ✓ e empilha para fora
-    // chord(yTop) = 2*sqrt(R²-yTop²) — é o chord HORIZONTAL no original, mas em LEFT/RIGHT precisamos
-    // do chord VERTICAL a um certo x. Geometricamente o círculo é simétrico — chord(x) é o mesmo
-    // independente de eixo (rotation invariance). Então a fórmula é a mesma.
-    //
-    // BOTTOM e LEFT são simétricos a TOP e RIGHT.
-    const leftCount = right.count;
+    // MIDDLE: para cada uma das 4 esquinas, tenta encaixar 1 costaneiro adjacente ao vértice
+    // da tábua principal (top-right corner do main = (W/2, H/2)).
+    // Costaneiro a partir desse ponto + kerf, ocupa rectângulo cw × ch (ou rotado).
+    // Tem de caber dentro do círculo: vértice oposto (xFar, yFar) deve ter xFar²+yFar² ≤ R².
+    function fitsMiddleCorner(cw, ch) {
+      const xFar = W/2 + kerf_d + cw;
+      const yFar = H/2 + kerf_d + ch;
+      return xFar*xFar + yFar*yFar <= R*R;
+    }
+    function packMiddle() {
+      // Tenta 2 orientações; usa a primeira que couber. Conta 4 (1 por esquina simétrica).
+      if (fitsMiddleCorner(w, h)) return 4;
+      if (fitsMiddleCorner(h, w)) return 4;
+      return 0;
+    }
 
-    const totalCostaneiros = top.count + bottomCount + right.count + leftCount;
-    const areaCost = w * h;
+    // Avalia ambas orientações em cada região; soma totais por orientação; pick best
+    const topOrient1 = packTopBottom(w, h);      // cost normal (larg=w, esp=h)
+    const topOrient2 = packTopBottom(h, w);      // cost rotado
+    const topCount = Math.max(topOrient1, topOrient2);
+
+    const lrOrient1 = packLeftRight(w, h);
+    const lrOrient2 = packLeftRight(h, w);
+    const lrCount = Math.max(lrOrient1, lrOrient2);
+
+    const middleCount = packMiddle();
+
+    const totalCostaneiros = topCount * 2 + lrCount + middleCount;  // top+bottom + LR + middle
     const areaWood = areaMain + totalCostaneiros * areaCost;
     const aproveitamento = areaWood / areaCircle;
 
@@ -2619,8 +2635,15 @@
       aproveitamento,
       desperdicio: 1 - aproveitamento,
       areaCircle, areaMain, areaCost, areaWood,
-      n: { top: top.count, bottom: bottomCount, right: right.count, left: leftCount, total: totalCostaneiros },
-      details: { top: top.strips, right: right.strips }
+      n: {
+        top: topCount,
+        bottom: topCount,
+        right: Math.floor(lrCount/2),
+        left: Math.ceil(lrCount/2),
+        middle: middleCount,
+        total: totalCostaneiros
+      },
+      details: { topOrient1, topOrient2, lrOrient1, lrOrient2, middleCount }
     };
   }
 
