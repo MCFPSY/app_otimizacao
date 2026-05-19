@@ -3240,6 +3240,52 @@
     // Total rolaria optimal
     const totalRolariaLP = allocations.reduce((s, a) => s + a.K * a.volume, 0);
 
+    // ==== COVERAGE CHAIN: para cada produto com demanda, decompor a oferta LP ====
+    // mainSupply[prod] = m³ produzidos como MAIN (Σ x_{prod, *})
+    // coSupply[prod] = lista de { fromTabua, m3 } onde m³ = x_{T, prod} × coRatio
+    // slackSupply[prod] = m³ não satisfeitos (shortfall)
+    // total = D[prod] (constraint = equality)
+    const coverageChain = {}; // por produto: { mainSupply, coSupply:[], slack, demand, isLibertado }
+    const shortfallMap = {};
+    shortfalls.forEach(s => { shortfallMap[s.product] = s.shortfall; });
+    // Inicializar para todos os produtos com demanda
+    for (const prod of productSet) {
+      const D = Number(demandMap.get(prod) || 0);
+      if (D <= 0) continue;
+      coverageChain[prod] = {
+        demand: D, mainSupply: 0, coSupply: [], slack: shortfallMap[prod] || 0,
+        isLibertado: false,
+      };
+    }
+    // Preencher main + co supplies a partir de allocations
+    allocations.forEach(a => {
+      // a contribui +a.volume para dem_{a.tabua} (main) e +a.volume*a.coRatio para dem_{a.cost} (co), se cost tiver demanda
+      if (coverageChain[a.tabua]) {
+        coverageChain[a.tabua].mainSupply += a.volume;
+      }
+      if (coverageChain[a.cost]) {
+        coverageChain[a.cost].coSupply.push({ fromTabua: a.tabua, m3: a.volume * a.coRatio, viaCost: a.cost });
+      }
+    });
+    // Marcar libertados: produto que era main no AS-IS (aparece em pairs como tábua) MAS no LP perdeu volume main
+    // (i.e., mainSupply < demand → parte é coberta por co-produto/slack)
+    const wasMainInAsIs = new Set(pairs.map(p => p.tabua));
+    for (const [prod, cv] of Object.entries(coverageChain)) {
+      if (wasMainInAsIs.has(prod) && cv.mainSupply < cv.demand - 0.5) {
+        cv.isLibertado = true;
+      }
+    }
+    // Sanity check: para cada produto, mainSupply + Σ coSupply + slack ≈ demand
+    for (const [prod, cv] of Object.entries(coverageChain)) {
+      const totalCo = cv.coSupply.reduce((s, x) => s + x.m3, 0);
+      cv.totalCoSupply = totalCo;
+      cv.balance = cv.mainSupply + totalCo + cv.slack - cv.demand;
+      if (Math.abs(cv.balance) > 0.5) {
+        console.warn(`[LP coverage] ${prod}: main=${cv.mainSupply.toFixed(2)} + co=${totalCo.toFixed(2)} + slack=${cv.slack.toFixed(2)} = ${(cv.mainSupply+totalCo+cv.slack).toFixed(2)} vs D=${cv.demand.toFixed(2)} (diff ${cv.balance.toFixed(2)})`);
+      }
+    }
+    console.log('[LP coverage chain]', coverageChain);
+
     // AS-IS rolaria para comparar: usa o dominant_costaneiro de cada pair
     let totalRolariaAS = 0;
     let totalTabuaAS = 0;
@@ -3260,7 +3306,7 @@
     const ganhoEur = ganhoTon * preco;
 
     return {
-      candidates, allocations, byTabua, shortfalls,
+      candidates, allocations, byTabua, shortfalls, coverageChain,
       totalRolariaAS, totalRolariaLP, ganhoVolumeRolaria, ganhoTon, ganhoEur,
       nProductsWithDemand, nCandidates: candidates.length,
       feasible: result.feasible !== false,
@@ -3278,7 +3324,7 @@
       if (totalEl) totalEl.textContent = 'erro';
       return;
     }
-    const { byTabua, shortfalls, ganhoTon, ganhoEur, nCandidates, nProductsWithDemand, feasible } = out;
+    const { byTabua, shortfalls, ganhoTon, ganhoEur, nCandidates, nProductsWithDemand, feasible, coverageChain } = out;
     if (totalEl) {
       totalEl.innerHTML = feasible
         ? `<strong>Ganho LP: ${fmtNum(ganhoTon)} ton/ano · €${fmtNum(ganhoEur)}/ano</strong>`
@@ -3307,6 +3353,69 @@
       ? '<span style="color:var(--color-green); font-weight:600;">✓ Todas as demandas satisfeitas</span>'
       : `<div class="banner banner-warn" style="margin-top:8px;"><strong>⚠ Shortfalls:</strong> ${shortfalls.map(s => `${s.product} (${fmtNum(s.shortfall)})`).join(', ')}</div>`;
 
+    // ==== Cadeia de cobertura: para cada produto cuja demanda NÃO é totalmente coberta como main_prod,
+    // mostrar quem cobre o restante. Ordenar libertados primeiro (era main no AS-IS), depois outros costaneiros.
+    let coverageHtml = '';
+    if (coverageChain) {
+      const wasMainSet = new Set(pairs.map(p => p.tabua));
+      const coverageRows = Object.entries(coverageChain)
+        .filter(([prod, cv]) => cv.totalCoSupply > 0.5 || cv.slack > 0.5)
+        .sort((a, b) => {
+          // libertados primeiro, depois por demand desc
+          const aLib = a[1].isLibertado ? 0 : 1;
+          const bLib = b[1].isLibertado ? 0 : 1;
+          if (aLib !== bLib) return aLib - bLib;
+          return b[1].demand - a[1].demand;
+        })
+        .map(([prod, cv]) => {
+          const mainPct = (cv.mainSupply / cv.demand * 100).toFixed(0);
+          const coPct = (cv.totalCoSupply / cv.demand * 100).toFixed(0);
+          const slackPct = (cv.slack / cv.demand * 100).toFixed(0);
+          const coDetails = cv.coSupply
+            .sort((a, b) => b.m3 - a.m3)
+            .map(c => `<span style="white-space:nowrap;"><strong>${c.fromTabua}</strong> → ${fmtNum(c.m3)} m³</span>`)
+            .join(' · ');
+          const slackChip = cv.slack > 0.5
+            ? `<span class="pill pill-red" style="margin-left:6px;">⚠ falta ${fmtNum(cv.slack)} m³ (${slackPct}%)</span>`
+            : '';
+          const libBadge = cv.isLibertado
+            ? `<span class="pill pill-orange" style="margin-left:6px;">libertado</span>`
+            : (wasMainSet.has(prod) ? '' : `<span class="pill pill-grey" style="margin-left:6px;">só co-produto</span>`);
+          return `<tr>
+            <td><strong>${prod}</strong>${libBadge}${slackChip}</td>
+            <td class="num">${fmtNum(cv.demand)}</td>
+            <td class="num">${fmtNum(cv.mainSupply)} <span style="color:var(--color-text-secondary); font-size:0.75rem;">(${mainPct}%)</span></td>
+            <td class="num">${fmtNum(cv.totalCoSupply)} <span style="color:var(--color-text-secondary); font-size:0.75rem;">(${coPct}%)</span></td>
+            <td>${coDetails || '<span style="color:var(--color-text-tertiary);">—</span>'}</td>
+          </tr>`;
+        }).join('');
+      if (coverageRows) {
+        coverageHtml = `
+        <details style="margin-top:16px;" open>
+          <summary style="cursor:pointer; font-weight:600; font-size:0.9rem; padding:8px 0;">
+            🔗 Cadeia de cobertura — demanda dos libertados / costaneiros
+          </summary>
+          <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-bottom:8px;">
+            Para cada produto cuja demanda é parcial ou totalmente coberta por co-produção: <strong>main</strong> = produzido como tábua principal, <strong>co</strong> = produzido como costaneiro de outras tábuas. Se aparecer <span class="pill pill-red">falta</span>, o LP não conseguiu satisfazer a demanda — esse défice é deduzido da poupança.
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th class="num">Demanda (m³/ano)</th>
+                  <th class="num">Como main</th>
+                  <th class="num">Como co-produto</th>
+                  <th>Origem do co-produto</th>
+                </tr>
+              </thead>
+              <tbody>${coverageRows}</tbody>
+            </table>
+          </div>
+        </details>`;
+      }
+    }
+
     el.innerHTML = `
       <div style="margin-bottom:12px; font-size:0.875rem;">
         Modelo LP: <strong>${nCandidates}</strong> variáveis (pares t×c viáveis) · <strong>${nProductsWithDemand}</strong> constraints de demanda
@@ -3329,6 +3438,7 @@
           <tbody>${tabuaRows}</tbody>
         </table>
       </div>
+      ${coverageHtml}
       <div class="banner banner-info" style="margin-top:16px; font-size:0.8125rem;">
         ✓ <strong>LP global coordenado:</strong> sem double-counting da demanda. Costaneiros co-produzidos somam para a sua demanda total (entre todas as tábuas). <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
       </div>
