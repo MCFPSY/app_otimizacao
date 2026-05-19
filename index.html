@@ -2564,105 +2564,83 @@
       return { error: `Tábua ${W}×${H} não cabe em Ø${D}` };
     }
     const areaCircle = PI * R * R;
-    const areaMain = W * H;
     const areaCost = w * h;
+
+    // === N MAIN TÁBUAS (paralelas verticais) ===
+    // Geometria correcta (revelada pelo esquema CAD do user):
+    // N tábuas verticais paralelas: H wide × W tall cada
+    // Stack horizontal: (N·H + (N-1)·kerf_d) ≤ 2·√(R²-(W/2)²)
+    const maxChordAtMainTop = 2 * Math.sqrt(R*R - (W/2)*(W/2));
+    const N_main = Math.floor((maxChordAtMainTop + kerf_d) / (H + kerf_d));
+    if (N_main < 1) return { error: 'Nenhuma tábua principal cabe' };
+    const areaMainTotal = N_main * W * H;
+    const xMainRight = (N_main * H + (N_main - 1) * kerf_d) / 2;
 
     function fitInStrip(availW, cw) {
       if (availW <= 0) return 0;
-      const n = Math.floor((availW + kerf_f) / (cw + kerf_f));
-      return Math.max(0, n);
+      return Math.max(0, Math.floor((availW + kerf_f) / (cw + kerf_f)));
     }
 
-    // TOP/BOTTOM packing: empilha rows até o cap TOTAL ser atingido OU não couber mais.
-    // CAP = limite TOTAL de costaneiros por região (TOP, BOTTOM independentes).
-    // Operacionalmente: a máquina não corta mais que `cap` costaneiros por linha de produção.
+    // === TOP COSTANEIROS (y > W/2 + kerf_d) ===
+    // Stack horizontal rows acima do bloco de tábuas principais
+    // Cap = total de costaneiros nesta região (TOP) — operacional
     function packTopBottom(cw, ch) {
-      let yPrev = H / 2;
+      let yPrev = W / 2;  // topo do bloco principal
       let count = 0;
-      const MAX_ROWS = 20;  // limite de segurança (geometria normalmente quebra antes)
-      for (let k = 0; k < MAX_ROWS && count < cap; k++) {
+      for (let k = 0; k < 20 && count < cap; k++) {
         const yBot = yPrev + kerf_d;
         const yTop = yBot + ch;
         if (yTop > R) break;
         const chord = 2 * Math.sqrt(R*R - yTop*yTop);
         const nRaw = fitInStrip(chord, cw);
         if (nRaw <= 0) break;
-        const allowed = Math.min(nRaw, cap - count);  // não exceder cap total
+        const allowed = Math.min(nRaw, cap - count);
         count += allowed;
         yPrev = yTop;
       }
       return count;
     }
 
-    // LEFT/RIGHT: idem para um dos lados (não as duas metades). Retorna count num lado.
+    // === LEFT/RIGHT COSTANEIROS (na ponta curva, x > xMainRight) ===
+    // Tipicamente este espaço é estreito demais para caber costaneiros
     function packLeftRight(cw, ch) {
-      let xPrev = W / 2;
+      let xPrev = xMainRight;
       let count = 0;
-      const MAX_ROWS = 20;
-      for (let k = 0; k < MAX_ROWS && count < cap; k++) {
+      for (let k = 0; k < 5 && count < cap; k++) {
         const xLeft = xPrev + kerf_d;
         const xRight = xLeft + ch;
         if (xRight > R) break;
-        const halfChord = Math.sqrt(R*R - xRight*xRight);
-        const partHeight = halfChord - H/2 - kerf_d;
-        if (partHeight <= 0) break;
-        const nPerHalfRaw = fitInStrip(partHeight, cw);
-        const allowedTotal = cap - count;
-        // cada strip vertical produz 2 (top half + bottom half), partilha o cap
-        const allowedPerHalf = Math.min(nPerHalfRaw, Math.floor(allowedTotal / 2));
-        const n = 2 * allowedPerHalf;
-        if (n <= 0) break;
-        count += n;
+        const chordVert = 2 * Math.sqrt(R*R - xRight*xRight);
+        const nRaw = fitInStrip(chordVert, cw);
+        if (nRaw <= 0) break;
+        const allowed = Math.min(nRaw, cap - count);
+        count += allowed;
         xPrev = xRight;
       }
       return count;
     }
 
-    // MIDDLE: para cada uma das 4 esquinas, tenta encaixar 1 costaneiro adjacente ao vértice
-    // da tábua principal (top-right corner do main = (W/2, H/2)).
-    // Costaneiro a partir desse ponto + kerf, ocupa rectângulo cw × ch (ou rotado).
-    // Tem de caber dentro do círculo: vértice oposto (xFar, yFar) deve ter xFar²+yFar² ≤ R².
-    function fitsMiddleCorner(cw, ch) {
-      const xFar = W/2 + kerf_d + cw;
-      const yFar = H/2 + kerf_d + ch;
-      return xFar*xFar + yFar*yFar <= R*R;
-    }
-    function packMiddle() {
-      // Tenta 2 orientações; usa a primeira que couber. Conta 4 (1 por esquina simétrica).
-      if (fitsMiddleCorner(w, h)) return 4;
-      if (fitsMiddleCorner(h, w)) return 4;
-      return 0;
-    }
+    // Tentar ambas orientações; pick best
+    const TOP = Math.max(packTopBottom(w, h), packTopBottom(h, w));
+    const LR  = Math.max(packLeftRight(w, h), packLeftRight(h, w));
 
-    // Avalia ambas orientações em cada região; soma totais por orientação; pick best
-    const topOrient1 = packTopBottom(w, h);      // cost normal (larg=w, esp=h)
-    const topOrient2 = packTopBottom(h, w);      // cost rotado
-    const topCount = Math.max(topOrient1, topOrient2);
-
-    const lrOrient1 = packLeftRight(w, h);
-    const lrOrient2 = packLeftRight(h, w);
-    const lrCount = Math.max(lrOrient1, lrOrient2);
-
-    const middleCount = packMiddle();
-
-    // lrCount já é por lado; multiplicar por 2 (left+right)
-    const totalCostaneiros = topCount * 2 + lrCount * 2 + middleCount;
-    const areaWood = areaMain + totalCostaneiros * areaCost;
+    const totalCostaneiros = 2 * TOP + 2 * LR;
+    const areaWood = areaMainTotal + totalCostaneiros * areaCost;
     const aproveitamento = areaWood / areaCircle;
 
     return {
       aproveitamento,
       desperdicio: 1 - aproveitamento,
-      areaCircle, areaMain, areaCost, areaWood,
+      areaCircle, areaMain: areaMainTotal, areaCost, areaWood,
       n: {
-        top: topCount,
-        bottom: topCount,
-        right: lrCount,
-        left: lrCount,
-        middle: middleCount,
+        main: N_main,
+        top: TOP,
+        bottom: TOP,
+        right: LR,
+        left: LR,
         total: totalCostaneiros
       },
-      details: { topOrient1, topOrient2, lrOrient1, lrOrient2, middleCount }
+      details: { N_main, TOP_per_side: TOP, LR_per_side: LR, xMainRight }
     };
   }
 
