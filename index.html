@@ -3354,24 +3354,44 @@
     const preco = Number(engineSettings.preco_eur_ton);
     const demandMap = await loadDemandMap();
 
-    // Para cada tábua: comparar main_prod_LP (Σ x_i) vs D_T
-    // Se main_prod_LP < D_T, parte da demanda é satisfeita por co-produção → SAVINGS aqui
+    // Slack absorve demanda não satisfeita (infeasibility). Detectar para NÃO contar como savings.
+    const slackByTabua = {};
+    (lpOut.shortfalls || []).forEach(s => { slackByTabua[s.product] = s.shortfall; });
+
+    // Para cada tábua: distinguir REDUÇÃO REAL (co-prod) de DEMANDA NÃO SATISFEITA (slack)
     const candidatos = [];
     for (const [tabua, grp] of Object.entries(lpOut.byTabua)) {
       const D_T = Number(demandMap.get(tabua) || 0);
       if (D_T <= 0) continue;
-      const reductionM3 = D_T - grp.totalVolume;
-      // Para tábuas com main_prod = D, reduction=0 → no savings here
-      if (reductionM3 < 0.5) continue;
-      // K médio da tábua (qualquer cost dá o mesmo K_T)
-      const firstAlloc = grp.allocations[0];
-      if (!firstAlloc) continue;
-      const K_T = firstAlloc.K;
-      const savedRolariaVol = K_T * reductionM3;
-      const savedTon = savedRolariaVol * ratio;
+      const slack_T = slackByTabua[tabua] || 0;
+      // co-produção real = demanda - main_prod_LP - slack
+      const coProdReal = D_T - grp.totalVolume - slack_T;
+      // Se co-prod real é ~0, este "main reduzido" é apenas slack (infeasibility) → NOT savings
+      if (coProdReal < 0.5) continue;
+
+      // Aprov AS-IS: usando dominant costaneiro
+      const p = pairs.find(p => p.tabua === tabua);
+      const tab = parseRefDim(tabua);
+      let asIsAprov = null, weightedAprov = grp.weightedAprov;
+      if (p && tab && tab.length) {
+        const curCost = parseRefDim(p.dominant_costaneiro);
+        if (curCost && curCost.length === tab.length) {
+          const asR = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, curCost.W, curCost.H,
+            Number(engineSettings.kerf_disco_mm),
+            Number(engineSettings.kerf_fita_mm),
+            Number(engineSettings.cap_costaneiros),
+            Number(engineSettings.pi_value));
+          if (!asR.error) asIsAprov = asR.aproveitamento;
+        }
+      }
+
+      // Saving: m³ co-prod real × ratio (2.13 ton rolaria/m³ serrada) × preço
+      // SEM K_T (já está no ratio, evita double-count)
+      const savedTon = coProdReal * ratio;
       const savedEur = savedTon * preco;
       candidatos.push({
-        tabua, D_T, mainProdLP: grp.totalVolume, reductionM3, K_T,
+        tabua, D_T, mainProdLP: grp.totalVolume, slack: slack_T,
+        coProdReal, asIsAprov, weightedAprov,
         savedTon, savedEur, allocations: grp.allocations,
       });
     }
@@ -3428,6 +3448,11 @@
         <div style="margin-top:10px; padding:8px 10px; background:#FFF9E6; border-left:3px solid var(--color-orange); border-radius:6px; font-size:0.8rem;">
           ⚠ <strong>Costaneiros libertados:</strong> ${[...libertados].join(', ')} — estes ficam sem este fornecedor; a demanda deles é redistribuída noutras tábuas (ver Vista LP completa para detalhes).
         </div>`;
+      const aprovAsIsStr = rec.asIsAprov ? (rec.asIsAprov*100).toFixed(1) + '%' : '—';
+      const aprovToBeStr = rec.weightedAprov ? (rec.weightedAprov*100).toFixed(1) + '%' : '—';
+      const slackNote = rec.slack > 0.5
+        ? `<div style="margin-top:4px; font-size:0.75rem; color:var(--color-orange);">⚠ Atenção: ${fmtNum(rec.slack)} m³ de demanda não satisfeita (slack) — LP infeasible para esta parte</div>`
+        : '';
       return `
         <div style="background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:20px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; gap:12px;">
@@ -3435,7 +3460,7 @@
               <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">#${i+1} TÁBUA — main_prod reduzido</div>
               <div style="font-size:1.25rem; font-weight:700; margin-top:2px;">${rec.tabua}</div>
               <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-top:4px;">
-                Demanda total: <strong>${fmtNum(rec.D_T)} m³/ano</strong> · K (rolaria/m³): ${rec.K_T.toFixed(2)}
+                Demanda total: <strong>${fmtNum(rec.D_T)} m³/ano</strong>
               </div>
             </div>
             <div style="text-align:right;">
@@ -3448,12 +3473,15 @@
           <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:16px; align-items:start; margin-top:12px;">
             <div style="background:var(--color-red-light); padding:12px 14px; border-radius:var(--radius-sm);">
               <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600;">AS-IS · 2025</div>
-              <div style="margin-top:6px; font-size:0.9rem;">Toda a demanda (${fmtNum(rec.D_T)} m³) produzida como <strong>main</strong> em linha 01.x</div>
+              <div style="margin-top:6px; font-size:0.9rem;">Toda a demanda (${fmtNum(rec.D_T)} m³) produzida como <strong>main</strong></div>
+              <div style="margin-top:4px; font-size:0.8125rem; color:var(--color-text-secondary);">Aprov médio: <strong>${aprovAsIsStr}</strong></div>
             </div>
             <div style="align-self:center; font-size:1.5rem; color:var(--color-text-tertiary);">→</div>
             <div style="background:var(--color-green-light); padding:12px 14px; border-radius:var(--radius-sm);">
               <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-green); font-weight:600;">TO-BE · LP</div>
-              <div style="margin-top:6px; font-size:0.9rem;">Main reduz para <strong>${fmtNum(rec.mainProdLP)} m³</strong> · resto (<strong style="color:var(--color-green)">${fmtNum(rec.reductionM3)} m³</strong>) vem como co-produto de outras tábuas</div>
+              <div style="margin-top:6px; font-size:0.9rem;">Main: <strong>${fmtNum(rec.mainProdLP)} m³</strong> · co-prod: <strong style="color:var(--color-green)">${fmtNum(rec.coProdReal)} m³</strong></div>
+              <div style="margin-top:4px; font-size:0.8125rem; color:var(--color-text-secondary);">Aprov ponderado: <strong>${aprovToBeStr}</strong></div>
+              ${slackNote}
             </div>
           </div>
 
