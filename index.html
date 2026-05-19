@@ -1855,8 +1855,9 @@
           <input type="number" id="calcCH" class="motor-input" value="14" step="1" min="5" max="50">
         </div>
         <div>
-          <label class="slider-label">Comprimento toro (mm)</label>
+          <label class="slider-label">Comprimento toro (mm) <span style="color:var(--color-text-tertiary); font-weight:400;">— só p/ m³</span></label>
           <input type="number" id="calcL" class="motor-input" value="2500" step="50" min="500" max="3000">
+          <div style="font-size:0.7rem; color:var(--color-text-tertiary); margin-top:4px;">Não afecta aproveitamento %, só o volume m³ derivado.</div>
         </div>
       </div>
 
@@ -2572,40 +2573,44 @@
       return Math.max(0, n);
     }
 
-    // TOP/BOTTOM packing: strips horizontais acima/abaixo. Costaneiro com larg=cw, esp=ch.
+    // TOP/BOTTOM packing: empilha rows até o cap TOTAL ser atingido OU não couber mais.
+    // CAP = limite TOTAL de costaneiros por região (TOP, BOTTOM independentes).
+    // Operacionalmente: a máquina não corta mais que `cap` costaneiros por linha de produção.
     function packTopBottom(cw, ch) {
       let yPrev = H / 2;
       let count = 0;
-      for (let k = 0; k < cap; k++) {
+      const MAX_ROWS = 20;  // limite de segurança (geometria normalmente quebra antes)
+      for (let k = 0; k < MAX_ROWS && count < cap; k++) {
         const yBot = yPrev + kerf_d;
         const yTop = yBot + ch;
         if (yTop > R) break;
         const chord = 2 * Math.sqrt(R*R - yTop*yTop);
-        const n = fitInStrip(chord, cw);
-        if (n <= 0) break;
-        count += n;
+        const nRaw = fitInStrip(chord, cw);
+        if (nRaw <= 0) break;
+        const allowed = Math.min(nRaw, cap - count);  // não exceder cap total
+        count += allowed;
         yPrev = yTop;
       }
       return count;
     }
 
-    // LEFT/RIGHT packing: strip à direita do main rect (com fita kerf entre).
-    // Strip tem largura horizontal ch (espessura do costaneiro), e o costaneiro ocupa altura cw.
-    // CONSTRAINT: strip não pode sobrepor o main rect → altura útil é dividida em 2 metades
-    // (acima e abaixo do main rect).
+    // LEFT/RIGHT: idem para um dos lados (não as duas metades). Retorna count num lado.
     function packLeftRight(cw, ch) {
       let xPrev = W / 2;
       let count = 0;
-      for (let k = 0; k < cap; k++) {
+      const MAX_ROWS = 20;
+      for (let k = 0; k < MAX_ROWS && count < cap; k++) {
         const xLeft = xPrev + kerf_d;
         const xRight = xLeft + ch;
         if (xRight > R) break;
-        const halfChord = Math.sqrt(R*R - xRight*xRight);  // chord vertical / 2
-        // Altura útil em metade superior (excluindo main rect + kerf)
+        const halfChord = Math.sqrt(R*R - xRight*xRight);
         const partHeight = halfChord - H/2 - kerf_d;
         if (partHeight <= 0) break;
-        const nPerHalf = fitInStrip(partHeight, cw);
-        const n = 2 * nPerHalf;  // top half + bottom half (simétrico)
+        const nPerHalfRaw = fitInStrip(partHeight, cw);
+        const allowedTotal = cap - count;
+        // cada strip vertical produz 2 (top half + bottom half), partilha o cap
+        const allowedPerHalf = Math.min(nPerHalfRaw, Math.floor(allowedTotal / 2));
+        const n = 2 * allowedPerHalf;
         if (n <= 0) break;
         count += n;
         xPrev = xRight;
@@ -2640,7 +2645,8 @@
 
     const middleCount = packMiddle();
 
-    const totalCostaneiros = topCount * 2 + lrCount + middleCount;  // top+bottom + LR + middle
+    // lrCount já é por lado; multiplicar por 2 (left+right)
+    const totalCostaneiros = topCount * 2 + lrCount * 2 + middleCount;
     const areaWood = areaMain + totalCostaneiros * areaCost;
     const aproveitamento = areaWood / areaCircle;
 
@@ -2651,8 +2657,8 @@
       n: {
         top: topCount,
         bottom: topCount,
-        right: Math.floor(lrCount/2),
-        left: Math.ceil(lrCount/2),
+        right: lrCount,
+        left: lrCount,
         middle: middleCount,
         total: totalCostaneiros
       },
