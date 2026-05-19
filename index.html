@@ -2870,31 +2870,34 @@
   function calcAprovMedioGama(gama, W, H, w, h, kerf_d, kerf_f, cap, piVal) {
     const diameters = gamaToDiametros(gama);
     if (diameters.length === 0) return { error: 'Gama sem Ø interpretável' };
-    let totalAprov = 0, totalN_main = 0, totalAreaCost = 0, totalAreaMain = 0, totalAreaCircle = 0;
-    let count = 0;
+    let sumAprov = 0, sumK = 0, sumCoRatio = 0;
+    let totalN_main = 0, totalAreaCost = 0, totalAreaMain = 0, totalAreaCircle = 0;
+    let validCount = 0, invalidCount = 0;
     for (const D of diameters) {
       const r = calcAproveitamento(D, W, H, w, h, kerf_d, kerf_f, cap, piVal);
-      if (r.error) {
-        // Para Ø onde a tábua nem cabe, aprov = 0 (mas conta no average para penalizar)
-        totalAprov += 0;
-        count++;
-        continue;
-      }
-      totalAprov += r.aproveitamento;
+      if (r.error) { invalidCount++; continue; }
+      const K_d = r.areaCircle / r.areaMain;
+      const coR_d = r.n.total * r.areaCost / r.areaMain;
+      sumAprov += r.aproveitamento;
+      sumK += K_d;
+      sumCoRatio += coR_d;
       totalN_main += r.n.main;
       totalAreaMain += r.areaMain;
       totalAreaCost += r.n.total * r.areaCost;
       totalAreaCircle += r.areaCircle;
-      count++;
+      validCount++;
     }
-    if (count === 0) return { error: 'Nenhum Ø viável' };
+    if (validCount === 0) return { error: 'Nenhum Ø viável' };
     return {
-      aproveitamento: totalAprov / count,
-      avgN_main: totalN_main / count,
-      avgAreaMain: totalAreaMain / count,
-      avgAreaCost: totalAreaCost / count,
-      avgAreaCircle: totalAreaCircle / count,
-      nDiameters: count,
+      aproveitamento: sumAprov / validCount,
+      avgK: sumK / validCount,
+      avgCoRatio: sumCoRatio / validCount,
+      avgN_main: totalN_main / validCount,
+      avgAreaMain: totalAreaMain / validCount,
+      avgAreaCost: totalAreaCost / validCount,
+      avgAreaCircle: totalAreaCircle / validCount,
+      nDiameters: validCount,
+      nInvalidDiameters: invalidCount,
     };
   }
 
