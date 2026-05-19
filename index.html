@@ -3254,7 +3254,9 @@
       totalTabuaAS += demand;
     }
     const ganhoVolumeRolaria = totalRolariaAS - totalRolariaLP;
-    const ganhoTon = ganhoVolumeRolaria * ratio;  // converter via rácio
+    // Conversão m³ rolaria → ton: density pinho fresco ≈ 0.85 ton/m³
+    const DENSITY_ROLARIA = 0.85;
+    const ganhoTon = ganhoVolumeRolaria * DENSITY_ROLARIA;
     const ganhoEur = ganhoTon * preco;
 
     return {
@@ -3391,8 +3393,10 @@
       const asRolariaM3 = asK * D_T;
       const lpRolariaM3 = grp.allocations.reduce((s, a) => s + a.K * a.volume, 0);
       const savedRolariaM3 = asRolariaM3 - lpRolariaM3;
-      // Conversão para ton: density rolaria ≈ 1 ton/m³ (madeira fresca ~ 1 ton/m³)
-      const savedTon = savedRolariaM3;
+      // Conversão para ton: density rolaria ≈ 0.85 ton/m³ (pinho fresco, típico sawmill PT)
+      // Validação cruzada com rácio canónico: 2.13 = density/aprov_avg ≈ 0.85/0.40
+      const DENSITY_ROLARIA = 0.85;
+      const savedTon = savedRolariaM3 * DENSITY_ROLARIA;
       const savedEur = savedTon * preco;
 
       // K efectivo no LP (ponderado)
@@ -3467,11 +3471,13 @@
       // Calcular slack penalty: rolaria que precisaria para produzir o slack dos libertados
       let libertadoSlackPenalty = 0;
       const libertadoSlackInfo = [];
+      const DENSITY_ROL = 0.85;  // consistente com global
       libertados.forEach(lib => {
         const slack = slackByTabua[lib] || 0;
         if (slack > 0.5) {
           const libK = asKofProduct(lib) || 2.13;
-          const penalty = libK * slack;
+          // penalty em ton: m³ rolaria que precisaria para produzir o slack
+          const penalty = libK * slack * DENSITY_ROL;
           libertadoSlackPenalty += penalty;
           libertadoSlackInfo.push({ name: lib, slack, penalty });
         }
