@@ -3059,13 +3059,19 @@
     const preco = Number(engineSettings.preco_eur_ton);
     const demandMap = await loadDemandMap();
 
-    // Construir candidatos: para cada tábua detectada, todos os costaneiros (dom + alts)
+    // Construir candidatos: para cada tábua detectada, todos os costaneiros (dom + alts + classe=C planeamento)
     // que sejam length-matched e geometricamente OK
     const candidates = [];
     const allCosts = new Set();
     pairs.forEach(p => {
       [p.dominant_costaneiro, ...p.alternatives.map(a => a.costaneiro)].forEach(c => allCosts.add(c));
     });
+    // ALARGAR: incluir todos os classe=C do Planeamento (mesmo não observados)
+    try {
+      const { data: planC } = await sb.from('planeamento_demanda').select('produto').eq('classe', 'C');
+      (planC || []).forEach(r => allCosts.add(r.produto));
+    } catch (_) {}
+    console.log('[LP] candidatos costaneiros considerados:', allCosts.size);
     for (const p of pairs) {
       const tab = parseRefDim(p.tabua);
       const D = gamaToD(p.gama_dominante);
@@ -3133,6 +3139,7 @@
     } catch (err) {
       return { error: 'LP solver falhou: ' + err.message };
     }
+    console.log('[LP] solve result:', result);
 
     // Extrair solução: para cada candidato, quanto foi atribuído
     const allocations = [];
@@ -3308,15 +3315,19 @@
         savedTon, savedEur, isSamePair,
       });
     }
-    // Filtrar mudanças efectivas (savedTon > 0 e não é o mesmo par exclusivo)
+    // Mostrar top 3 onde AS-IS ≠ TO-BE (mix mudou), ordenado por |savings €| descendente
     const candidatosComMudanca = candidatos
-      .filter(c => !c.isSamePair && c.savedTon > 0)
-      .sort((a, b) => b.savedEur - a.savedEur);
+      .filter(c => !c.isSamePair)
+      .sort((a, b) => Math.abs(b.savedEur) - Math.abs(a.savedEur));
     const top3 = candidatosComMudanca.slice(0, 3);
+    console.log('[LP] candidatos totais:', candidatos.length, '· com mudança:', candidatosComMudanca.length);
 
     if (top3.length === 0) {
-      el.innerHTML = '<div class="empty-state" style="padding:20px;"><p>Não há mudanças significativas a recomendar — o AS-IS já está próximo do óptimo encontrado pelo LP.</p></div>';
-      if (totalEl) totalEl.textContent = 'AS-IS ≈ TO-BE';
+      el.innerHTML = `<div class="empty-state" style="padding:20px;">
+        <p><strong>LP retornou o mesmo costaneiro que o AS-IS para todas as tábuas.</strong></p>
+        <p style="margin-top:8px; font-size:0.85rem;">Isto pode significar: (1) o AS-IS já está próximo do óptimo dentro dos candidatos testados, ou (2) os constraints de demanda de costaneiros estão a forçar manutenção da configuração actual. Tens ${candidatos.length} tábuas no LP. Abre a consola (F12) para detalhes.</p>
+      </div>`;
+      if (totalEl) totalEl.textContent = 'AS-IS = TO-BE';
       return;
     }
     const totalSavedTon = top3.reduce((s, c) => s + c.savedTon, 0);
