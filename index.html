@@ -1820,6 +1820,19 @@
         <span class="pill pill-orange">v1 simplificado</span>
       </div>
 
+      <!-- Casos de teste pré-definidos (validar contra Folha5) -->
+      <div style="margin-top:16px; padding:16px; background:var(--color-background); border-radius:var(--radius-sm);">
+        <div style="font-weight:600; margin-bottom:10px; font-size:0.95rem;">🧪 Casos de teste — clica para preencher</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="presetButtons"></div>
+        <div style="margin-top:16px;">
+          <label class="slider-label" for="calcExpected">Aproveitamento esperado (Folha5, % — opcional)</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="calcExpected" class="motor-input" placeholder="ex: 54.6" step="0.1" min="0" max="100" style="max-width:160px;">
+            <span style="font-size:0.85rem; color:var(--color-text-secondary);">→ permite ver o delta entre algoritmo e Folha5</span>
+          </div>
+        </div>
+      </div>
+
       <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:16px;">
         <div>
           <label class="slider-label">Tábua principal · largura (mm)</label>
@@ -2675,10 +2688,15 @@
     const vol_cost_per_log = r.areaCost * r.n.total * L / 1e9;
     const vol_log = r.areaCircle * L / 1e9;
 
-    // Comparação com mockup conhecido (800×145×22 + 95×14 + Ø195)
-    const isKnownCase = (W===145 && H===22 && cw===95 && ch===14 && D===195);
-    const mockupAprov = 0.546;
-    const delta = isKnownCase ? (r.aproveitamento - mockupAprov) : null;
+    // Comparação manual: utilizador pode inserir valor Folha5 esperado
+    const expectedInput = document.getElementById('calcExpected');
+    const expectedRaw = expectedInput ? Number(expectedInput.value) : NaN;
+    const hasExpected = !isNaN(expectedRaw) && expectedRaw > 0;
+    const expectedAprov = hasExpected ? expectedRaw / 100 : null;
+    const delta = hasExpected ? (r.aproveitamento - expectedAprov) : null;
+    // Compatibilidade legacy: caso conhecido do mockup
+    const isKnownCase = !hasExpected && (W===145 && H===22 && cw===95 && ch===14 && D===195);
+    const mockupAprov = isKnownCase ? 0.546 : null;
 
     out.innerHTML = `
       <div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:24px;">
@@ -2696,15 +2714,22 @@
             </div>
           </div>
 
-          ${isKnownCase ? `
-            <div class="banner banner-${Math.abs(delta) < 0.05 ? 'info' : 'warn'}" style="margin-top:16px;">
-              <strong>Validação vs. mockup (800×145×22 + 95×14, Ø195):</strong>
-              Mockup esperado <strong>${fmtPct(mockupAprov)}</strong>, algoritmo dá <strong>${fmtPct(r.aproveitamento)}</strong>.
-              Δ = <strong>${delta>=0?'+':''}${(delta*100).toFixed(1)}pp</strong>.
-              ${Math.abs(delta) < 0.05
-                ? 'Dentro de ±5pp — aceitável para v1, refinamento de MIDDLE segments na próxima iteração.'
-                : 'Desvio significativo — o algoritmo está a sub/sobreestimar. Necessário refinamento.'}
-            </div>` : ''}
+          ${hasExpected ? `
+            <div class="banner banner-${Math.abs(delta) < 0.03 ? 'info' : (Math.abs(delta) < 0.07 ? 'warn' : 'error')}" style="margin-top:16px;">
+              <strong>Validação contra Folha5 (manual):</strong>
+              Esperado <strong>${fmtPct(expectedAprov)}</strong>, algoritmo dá <strong>${fmtPct(r.aproveitamento)}</strong>.
+              Δ = <strong style="font-size:1.1em;">${delta>=0?'+':''}${(delta*100).toFixed(1)}pp</strong>.
+              ${Math.abs(delta) < 0.03
+                ? '✓ Dentro de ±3pp — algoritmo está calibrado.'
+                : (Math.abs(delta) < 0.07
+                  ? '⚠ Off por 3-7pp — aceitável mas refinável.'
+                  : '✗ Off por >7pp — algoritmo precisa de revisão (MIDDLE segments + mix de costaneiros).')}
+            </div>` : (isKnownCase ? `
+            <div class="banner banner-warn" style="margin-top:16px;">
+              <strong>Caso pré-validado (800×145×22 + 95×14, Ø195):</strong>
+              Mockup dizia <strong>${fmtPct(mockupAprov)}</strong>, algoritmo dá <strong>${fmtPct(r.aproveitamento)}</strong>.
+              Δ = <strong>${(r.aproveitamento - mockupAprov)*100>=0?'+':''}${((r.aproveitamento - mockupAprov)*100).toFixed(1)}pp</strong>.
+            </div>` : '')}
         </div>
 
         <div>
@@ -2729,12 +2754,45 @@
   }
 
   // Re-run quando o user mexe nos inputs
-  ['calcW','calcH','calcD','calcCW','calcCH','calcL'].forEach(id => {
+  ['calcW','calcH','calcD','calcCW','calcCH','calcL','calcExpected'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', rerunCalc);
   });
-  // Primeira execução quando a tab Motor é aberta — usamos hashchange ou DOMContentLoaded
-  setTimeout(rerunCalc, 100);
+
+  // ===== Casos de teste pré-definidos (típicos da produção MCF) =====
+  const PRESETS = [
+    { label: '800×145×22 · cost 95×14 · Ø195', W:145, H:22, D:195, cw:95, ch:14, L:2600 },
+    { label: '800×145×22 · cost 98×18 · Ø260', W:145, H:22, D:260, cw:98, ch:18, L:2600 },
+    { label: '1200×100×22 · cost 78×18 · Ø195', W:100, H:22, D:195, cw:78, ch:18, L:2500 },
+    { label: '1200×145×22 · cost 98×16 · Ø260', W:145, H:22, D:260, cw:98, ch:16, L:2500 },
+    { label: '1000×98×22 · cost 90×14 · Ø210', W:98, H:22, D:210, cw:90, ch:14, L:2100 },
+    { label: '800×98×18 · cost 78×14 · Ø195', W:98, H:18, D:195, cw:78, ch:14, L:2600 },
+  ];
+  function loadPreset(p) {
+    document.getElementById('calcW').value = p.W;
+    document.getElementById('calcH').value = p.H;
+    document.getElementById('calcD').value = p.D;
+    document.getElementById('calcCW').value = p.cw;
+    document.getElementById('calcCH').value = p.ch;
+    document.getElementById('calcL').value = p.L;
+    document.getElementById('calcExpected').value = '';
+    rerunCalc();
+  }
+  // Render preset buttons
+  setTimeout(() => {
+    const container = document.getElementById('presetButtons');
+    if (container) {
+      container.innerHTML = PRESETS.map((p, i) =>
+        `<button class="btn btn-ghost" data-preset-idx="${i}" style="font-size:0.8rem;">${p.label}</button>`
+      ).join('');
+      container.querySelectorAll('button[data-preset-idx]').forEach(btn => {
+        btn.addEventListener('click', () => loadPreset(PRESETS[Number(btn.dataset.presetIdx)]));
+      });
+    }
+  }, 100);
+
+  // Primeira execução quando a tab Motor é aberta
+  setTimeout(rerunCalc, 200);
 
   // ===== Marco 5.3: Pares reais a partir da produção =====
   //
