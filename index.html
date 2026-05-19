@@ -2739,14 +2739,15 @@
         </div>
 
         <div>
-          <div style="font-weight:600; margin-bottom:8px; font-size:0.9rem;">Decomposição de costaneiros</div>
+          <div style="font-weight:600; margin-bottom:8px; font-size:0.9rem;">Decomposição</div>
           <table class="data">
             <tr><th>Região</th><th class="num">N</th><th class="num">Área (mm²)</th></tr>
-            <tr><td>TOP (acima da tábua)</td><td class="num">${r.n.top}</td><td class="num">${(r.n.top*r.areaCost).toFixed(0)}</td></tr>
-            <tr><td>BOTTOM (abaixo)</td><td class="num">${r.n.bottom}</td><td class="num">${(r.n.bottom*r.areaCost).toFixed(0)}</td></tr>
-            <tr><td>RIGHT (à direita)</td><td class="num">${r.n.right}</td><td class="num">${(r.n.right*r.areaCost).toFixed(0)}</td></tr>
-            <tr><td>LEFT (à esquerda)</td><td class="num">${r.n.left}</td><td class="num">${(r.n.left*r.areaCost).toFixed(0)}</td></tr>
-            <tr class="summary"><td>Total madeira útil</td><td class="num">${r.n.total + 1}</td><td class="num">${r.areaWood.toFixed(0)}</td></tr>
+            <tr style="background:var(--color-blue-light);"><td><strong>Tábuas principais</strong> (paralelas)</td><td class="num"><strong>${r.n.main}</strong></td><td class="num"><strong>${r.areaMain.toFixed(0)}</strong></td></tr>
+            <tr><td>Costaneiros TOP</td><td class="num">${r.n.top}</td><td class="num">${(r.n.top*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>Costaneiros BOTTOM</td><td class="num">${r.n.bottom}</td><td class="num">${(r.n.bottom*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>Costaneiros LEFT (ponta curva)</td><td class="num">${r.n.left}</td><td class="num">${(r.n.left*r.areaCost).toFixed(0)}</td></tr>
+            <tr><td>Costaneiros RIGHT (ponta curva)</td><td class="num">${r.n.right}</td><td class="num">${(r.n.right*r.areaCost).toFixed(0)}</td></tr>
+            <tr class="summary"><td>Total madeira útil</td><td class="num">${r.n.main + r.n.total}</td><td class="num">${r.areaWood.toFixed(0)}</td></tr>
             <tr><td colspan="2">Área do círculo</td><td class="num">${r.areaCircle.toFixed(0)}</td></tr>
           </table>
           ${r.details.top && r.details.top.length ? `
