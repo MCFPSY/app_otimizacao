@@ -2502,8 +2502,17 @@
     const { data, error } = await sb.from('engine_settings').select('*').eq('id', 1).single();
     if (error) {
       console.error('loadEngineSettings:', error);
-      setMotorStatus('warn', '<strong>Erro a carregar settings:</strong> ' + error.message);
-      return null;
+      // Fallback: usar canónicos in-memory para a app continuar a funcionar
+      const isMissingTable = /relation .* does not exist|42P01|PGRST205/i.test(error.message || error.code || '');
+      const fallback = { id: 1, ...CANONICAL, notes: null, updated_at: null, updated_by: null };
+      engineSettings = fallback;
+      applyEngineSettingsToForm(fallback);
+      if (isMissingTable) {
+        setMotorStatus('warn', '<strong>⚠ Tabela <code>engine_settings</code> não existe.</strong> A app vai usar valores canónicos em memória (não persiste). Corre o script <code>sql/2026-05-19_engine_settings_tolerance_density.sql</code> (ou o bootstrap completo) no Supabase SQL Editor para activar persistência.');
+      } else {
+        setMotorStatus('warn', '<strong>Erro a carregar settings:</strong> ' + (error.message || error.code) + ' — a usar canónicos em memória.');
+      }
+      return fallback;
     }
     // Hidratar com canónicos se DB ainda não tem colunas novas
     if (data && data.density_rolaria_ton_m3 == null) data.density_rolaria_ton_m3 = CANONICAL.density_rolaria_ton_m3;
