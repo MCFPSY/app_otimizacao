@@ -1722,8 +1722,31 @@
       <ul style="padding-left:20px; line-height:1.8;">
         <li>MCF produz "1 referência por dia × 2 turnos" ≈ <strong>~50 m³/dia</strong> (varia por ref).</li>
         <li>Recomendações expressas em <strong>múltiplos de dias de produção</strong>, não m³ arbitrários.</li>
-        <li><strong>Tolerância ±10%</strong> na satisfação da demanda (stocks nunca 100% ajustados).</li>
+        <li>Ver painel a seguir para detalhe da tolerância de demanda usada no LP.</li>
       </ul>
+    </div>
+
+    <div class="panel" style="border-left:4px solid var(--color-blue);">
+      <div class="panel-title" style="margin-bottom:12px;">📊 Tolerância de demanda (±%) — racional e implicação no LP</div>
+      <p style="line-height:1.7;">
+        Na prática operacional, a entrega de cada referência <strong>nunca é exactamente igual à demanda nominal</strong>: há stocks, há sobra-falta entre meses, e há flexibilidade no plano comercial. Forçar o LP a entregar exactamente <code>supply = D</code> por produto deixa dinheiro em cima da mesa (constraint demasiado apertada) sem ganho operacional real.
+      </p>
+      <p style="line-height:1.7; margin-top:10px;">
+        Por isso, cada constraint de demanda no LP é uma <strong>banda</strong>:
+      </p>
+      <pre style="background:var(--color-background); padding:12px; border-radius:8px; font-size:0.9rem; margin-top:8px; overflow-x:auto;">(1 − tol) · D  ≤  supply  ≤  (1 + tol) · D</pre>
+      <ul style="padding-left:20px; line-height:1.8; margin-top:12px;">
+        <li><strong>Default:</strong> <code>tol = 10%</code> — i.e. o LP pode entregar entre 90% e 110% da demanda nominal de cada produto.</li>
+        <li><strong>Editável:</strong> em <em>Motor → Tolerância de demanda</em>. Aceita 0% (entrega exacta, rigído) até qualquer valor razoável (10–20% operacional típico).</li>
+        <li><strong>Slack:</strong> só fica > 0 quando nem o limite inferior é atingível — i.e. infeasibility real. Aparece com pill vermelha <span class="pill pill-red">⚠ falta</span> na cadeia de cobertura.</li>
+        <li><strong>Onde se vê o efeito:</strong> em <em>Combinações → Vista LP completa → 🔗 Cadeia de cobertura</em>, a coluna "Total entregue" mostra o desvio % vs. demanda nominal de cada produto.</li>
+      </ul>
+      <p style="line-height:1.7; margin-top:10px;">
+        <strong>Cuidado interpretativo:</strong> uma poupança em rolaria pode vir de (a) melhor mix de combinações para a mesma cesta — saving real, ou (b) entregar menos de algum produto dentro da banda — saving condicional à aceitação operacional do desvio. As recomendações no Top 3 distinguem estes dois tipos.
+      </p>
+      <p style="line-height:1.7; margin-top:10px; font-size:0.85rem; color:var(--color-text-secondary);">
+        Quando a tolerância está a 0%, o modelo cai exactamente na versão original com igualdade rígida — útil para baseline comparativa.
+      </p>
     </div>
 
     <div class="panel" style="border-left:4px solid var(--color-red);">
@@ -3538,17 +3561,28 @@
     const slackByTabua = {};
     (lpOut.shortfalls || []).forEach(s => { slackByTabua[s.product] = s.shortfall; });
 
-    // Per-tábua saving = (asK × D_T) - (Σ K_LP × x_LP)
-    // Captura tanto reduções de main_prod como melhorias de K (combinação melhor).
-    // Soma per-tábua = LP global saving (exactamente). Compensações estão noutras tábuas
-    // (cujo main_prod ficou em D, e cujo K pode ter mudado).
+    // Per-tábua saving = (asK × D_T) − (Σ K_LP × x_LP)
+    // Decomposição honesta em 3 fontes:
+    //   (a) realCoSupply  — m³ desta tábua co-produzidos por OUTRAS (lpOut.coverageChain)
+    //   (b) underDelivery — m³ não entregues dentro da banda de tolerância (não é co-produção)
+    //   (c) lpKeff vs asK — melhoria de K na produção mantida como main
+    //
+    // savingTotal = savingFromMix + savingFromReallocation + savingFromUnderDelivery
+    //   savingFromMix         = (asK − lpKeff) × mainSupply        (sempre real)
+    //   savingFromReallocation = asK × realCoSupply                  (redistribuição na cesta — neutro no global)
+    //   savingFromUnderDelivery = asK × underDelivery                (depende de aceitares o desvio)
     const candidatos = [];
     for (const [tabua, grp] of Object.entries(lpOut.byTabua)) {
       const D_T = Number(demandMap.get(tabua) || 0);
       if (D_T <= 0) continue;
       const slack_T = slackByTabua[tabua] || 0;
-      const coProdReal = D_T - grp.totalVolume - slack_T;
-      if (coProdReal < 0.5) continue;
+      const mainSupply = grp.totalVolume;
+      const cv = (lpOut.coverageChain && lpOut.coverageChain[tabua]) || null;
+      const realCoSupply = cv ? cv.totalCoSupply : 0;
+      const underDelivery = Math.max(0, D_T - mainSupply - realCoSupply - slack_T);
+
+      // Só interessam candidatas com ALGUMA mudança vs AS-IS (main reduzido ou K mudou)
+      if (realCoSupply < 0.5 && underDelivery < 0.5 && Math.abs(D_T - mainSupply) < 0.5) continue;
 
       const p = pairs.find(p => p.tabua === tabua);
       const tab = parseRefDim(tabua);
@@ -3567,30 +3601,52 @@
       }
       if (asK == null) continue;
 
-      // Rolaria m³ AS-IS vs LP para esta tábua
-      const asRolariaM3 = asK * D_T;
+      // K efectivo no LP (ponderado)
       const lpRolariaM3 = grp.allocations.reduce((s, a) => s + a.K * a.volume, 0);
-      const savedRolariaM3 = asRolariaM3 - lpRolariaM3;
-      // Conversão para ton: density configurável (canónico 0.85 pinho fresco)
+      const lpKeff = mainSupply > 0 ? lpRolariaM3 / mainSupply : asK;
+
+      // Decomposição do saving (m³ rolaria)
+      const savingFromMix = (asK - lpKeff) * mainSupply;
+      const savingFromReallocation = asK * realCoSupply;
+      const savingFromUnderDelivery = asK * underDelivery;
+      const savedRolariaM3 = savingFromMix + savingFromReallocation + savingFromUnderDelivery;
+      // (= asK * D_T − lpKeff * mainSupply − asK * slack — slack é shortfall, não saving)
+
       const DENSITY_ROLARIA = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
       const savedTon = savedRolariaM3 * DENSITY_ROLARIA;
       const savedEur = savedTon * preco;
+      const savedTonMix = savingFromMix * DENSITY_ROLARIA;
+      const savedTonRealloc = savingFromReallocation * DENSITY_ROLARIA;
+      const savedTonUnder = savingFromUnderDelivery * DENSITY_ROLARIA;
 
-      // K efectivo no LP (ponderado)
-      const lpKeff = grp.totalVolume > 0 ? lpRolariaM3 / grp.totalVolume : asK;
+      // "Saving robusto" = independente de aceitares under-delivery
+      const robustSavedTon = savedTonMix + savedTonRealloc;
+      const robustSavedEur = robustSavedTon * preco;
+      // Tipo dominante (para badge)
+      const totals = [
+        { kind: 'mix', val: savedTonMix },
+        { kind: 'realloc', val: savedTonRealloc },
+        { kind: 'under', val: savedTonUnder },
+      ].sort((a,b) => b.val - a.val);
+      const dominant = totals[0].kind;
+      const underPctOfTotal = savedTon > 0.001 ? (savedTonUnder / savedTon) : 0;
 
       candidatos.push({
         tabua, D_T,
-        mainProdLP: grp.totalVolume,
-        coProdReal, slack: slack_T,
+        mainProdLP: mainSupply,
+        realCoSupply, underDelivery, slack: slack_T,
         asIsAprov, weightedAprov: grp.weightedAprov,
         asK, lpKeff,
-        asRolariaM3, lpRolariaM3, savedRolariaM3,
+        asRolariaM3: asK * D_T, lpRolariaM3, savedRolariaM3,
         savedTon, savedEur,
+        savedTonMix, savedTonRealloc, savedTonUnder,
+        robustSavedTon, robustSavedEur,
+        dominant, underPctOfTotal,
         allocations: grp.allocations,
       });
     }
-    candidatos.sort((a, b) => b.savedEur - a.savedEur);
+    // Ordenar por saving robusto (mix + realloc) — under-delivery é tie-breaker, não dominante
+    candidatos.sort((a, b) => (b.robustSavedTon - a.robustSavedTon) || (b.savedTon - a.savedTon));
     const top3 = candidatos.slice(0, 3);
 
     // Quem produz este cost como co-produto? Inclui também o AS-IS dominante deles (cadeia)
@@ -3625,7 +3681,11 @@
     }
     const totalSavedTon = top3.reduce((s, c) => s + c.savedTon, 0);
     const totalSavedEur = top3.reduce((s, c) => s + c.savedEur, 0);
-    if (totalEl) totalEl.innerHTML = `<strong>Top 3: ${fmtNum(totalSavedTon)} ton/ano · €${fmtNum(totalSavedEur)}/ano</strong>`;
+    const totalRobustTon = top3.reduce((s, c) => s + c.robustSavedTon, 0);
+    const totalRobustEur = top3.reduce((s, c) => s + c.robustSavedEur, 0);
+    const totalUnderTon = top3.reduce((s, c) => s + c.savedTonUnder, 0);
+    const totalUnderEur = totalUnderTon * preco;
+    if (totalEl) totalEl.innerHTML = `<strong>Top 3 robusto: ${fmtNum(totalRobustTon)} ton · €${fmtNum(totalRobustEur)}/ano</strong>${totalUnderTon > 0.5 ? ` <span style="color:var(--color-orange); font-size:0.85rem;">+ €${fmtNum(totalUnderEur)} condicional</span>` : ''}`;
     // Para cada libertado, calcular K médio (para penalizar slack)
     function asKofProduct(prodName) {
       const pp = pairs.find(p => p.tabua === prodName);
@@ -3693,45 +3753,95 @@
       const slackNote = rec.slack > 0.5
         ? `<div style="margin-top:4px; font-size:0.75rem; color:var(--color-orange);">⚠ Atenção: ${fmtNum(rec.slack)} m³ de demanda não satisfeita (slack) — LP infeasible para esta parte</div>`
         : '';
+
+      // Total entregue e desvio % vs nominal
+      const totalEntregue = rec.mainProdLP + rec.realCoSupply;
+      const desvioPct = ((totalEntregue - rec.D_T) / rec.D_T * 100);
+      const desvioStr = `${desvioPct >= 0 ? '+' : ''}${desvioPct.toFixed(1)}%`;
+
+      // Pill de origem do saving
+      const kindLabel = {
+        mix: { txt: 'melhor mix de combinações', cls: 'pill-green' },
+        realloc: { txt: 'redistribuição para outras tábuas', cls: 'pill-blue' },
+        under: { txt: `entrega ${desvioStr} vs nominal (dentro da banda)`, cls: 'pill-orange' },
+      }[rec.dominant] || { txt: 'misto', cls: 'pill-grey' };
+      const undersharePct = (rec.underPctOfTotal * 100).toFixed(0);
+
+      // TO-BE descrição: distinguir co-prod real de under-delivery
+      const tobeBreakdown = [];
+      tobeBreakdown.push(`<strong>${fmtNum(rec.mainProdLP)} m³</strong> main`);
+      if (rec.realCoSupply > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-blue)">${fmtNum(rec.realCoSupply)} m³</strong> co-prod de outras`);
+      if (rec.underDelivery > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-orange)">−${fmtNum(rec.underDelivery)} m³</strong> menor entrega (banda)`);
+      if (rec.slack > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-red)">−${fmtNum(rec.slack)} m³</strong> shortfall`);
+      const tobeStr = tobeBreakdown.join(' + ').replace(/\+ −/g,'− ');
+
       return `
         <div style="background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:20px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; gap:12px;">
             <div>
-              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">#${i+1} TÁBUA — main_prod reduzido</div>
+              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">#${i+1} TÁBUA</div>
               <div style="font-size:1.25rem; font-weight:700; margin-top:2px;">${rec.tabua}</div>
               <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-top:4px;">
-                Demanda total: <strong>${fmtNum(rec.D_T)} m³/ano</strong>
+                Demanda nominal: <strong>${fmtNum(rec.D_T)} m³/ano</strong>
+              </div>
+              <div style="margin-top:6px;">
+                <span class="pill ${kindLabel.cls}">Origem do ganho: ${kindLabel.txt}</span>
               </div>
             </div>
             <div style="text-align:right;">
-              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">GANHO NET</div>
-              <div style="font-size:1.5rem; font-weight:700; color:${netSavedTon > 0 ? 'var(--color-green)' : 'var(--color-red)'};">€${fmtNum(netSavedEur)}/ano</div>
-              <div style="font-size:0.8125rem; color:var(--color-text-secondary);">${fmtNum(netSavedTon)} ton rolaria poupada</div>
+              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">GANHO ROBUSTO</div>
+              <div style="font-size:1.5rem; font-weight:700; color:var(--color-green);">€${fmtNum(rec.robustSavedEur)}/ano</div>
+              <div style="font-size:0.7rem; color:var(--color-text-secondary);">${fmtNum(rec.robustSavedTon)} ton — só mix + redistribuição</div>
+              ${rec.savedTonUnder > 0.5 ? `
+                <div style="margin-top:6px; padding-top:6px; border-top:1px solid var(--color-border-soft);">
+                  <div style="font-size:0.7rem; color:var(--color-orange);">+ ganho condicional (under-delivery)</div>
+                  <div style="font-size:0.95rem; font-weight:600; color:var(--color-orange);">+€${fmtNum(rec.savedTonUnder * preco)}/ano</div>
+                  <div style="font-size:0.7rem; color:var(--color-text-secondary);">${fmtNum(rec.savedTonUnder)} ton — depende de aceitares entregar ${fmtNum(rec.underDelivery)} m³ a menos</div>
+                </div>` : ''}
               ${isInflated ? `<div style="margin-top:4px;">${grossNetDiff}</div>` : ''}
             </div>
           </div>
 
           <div style="background:var(--color-background); padding:10px 14px; border-radius:var(--radius-sm); margin-top:12px; font-size:0.8125rem; color:var(--color-text-secondary);">
-            <strong>📊 Output 1200×_×_ (output total = ${fmtNum(rec.D_T)} m³ — mesmo nos dois cenários):</strong>
+            <strong>📊 Balanço por produto (${rec.tabua}):</strong>
           </div>
           <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:16px; align-items:start; margin-top:8px;">
             <div style="background:var(--color-red-light); padding:12px 14px; border-radius:var(--radius-sm);">
-              <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600;">AS-IS · 2025</div>
-              <div style="margin-top:6px; font-size:0.9rem;">${fmtNum(rec.D_T)} m³ como <strong>main</strong> + 0 m³ co-prod</div>
+              <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-red); font-weight:600;">AS-IS · baseline</div>
+              <div style="margin-top:6px; font-size:0.9rem;">${fmtNum(rec.D_T)} m³ como <strong>main</strong> · 0 m³ co-prod</div>
               <div style="margin-top:4px; font-size:0.8125rem;">Aprov: <strong>${aprovAsIsStr}</strong> · K: ${rec.asK.toFixed(2)}</div>
               <div style="margin-top:2px; font-size:0.8125rem; color:var(--color-text-secondary);">→ Rolaria input: <strong>${fmtNum(rec.asRolariaM3)} m³</strong></div>
             </div>
             <div style="align-self:center; font-size:1.5rem; color:var(--color-text-tertiary);">→</div>
             <div style="background:var(--color-green-light); padding:12px 14px; border-radius:var(--radius-sm);">
               <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-green); font-weight:600;">TO-BE · LP</div>
-              <div style="margin-top:6px; font-size:0.9rem;"><strong>${fmtNum(rec.mainProdLP)} m³</strong> main + <strong style="color:var(--color-green)">${fmtNum(rec.coProdReal)} m³</strong> co-prod</div>
+              <div style="margin-top:6px; font-size:0.9rem;">${tobeStr}</div>
+              <div style="margin-top:4px; font-size:0.8125rem;">
+                Total entregue: <strong>${fmtNum(totalEntregue)} m³</strong>
+                <span style="color:${Math.abs(desvioPct) < 0.5 ? 'var(--color-text-secondary)' : (desvioPct < 0 ? 'var(--color-orange)' : 'var(--color-blue)')}; font-size:0.75rem;">(${desvioStr})</span>
+              </div>
               <div style="margin-top:4px; font-size:0.8125rem;">Aprov ponderado: <strong>${aprovToBeStr}</strong> · K: ${rec.lpKeff.toFixed(2)}</div>
               <div style="margin-top:2px; font-size:0.8125rem; color:var(--color-text-secondary);">→ Rolaria input: <strong>${fmtNum(rec.lpRolariaM3)} m³</strong></div>
               ${slackNote}
             </div>
           </div>
-          <div style="margin-top:8px; padding:8px 12px; background:rgba(52,199,89,0.10); border-left:3px solid var(--color-green); border-radius:6px; font-size:0.85rem;">
-            💡 <strong>Output igual</strong> (mesma cesta produzida) · <strong style="color:var(--color-green)">Input rolaria reduzido em ${fmtNum(rec.savedRolariaM3)} m³ ≈ ${fmtNum(rec.savedTon)} ton</strong>
+
+          <div style="margin-top:8px; padding:10px 14px; background:#F9F9FB; border-left:3px solid var(--color-text-tertiary); border-radius:6px; font-size:0.82rem;">
+            <strong>Decomposição do saving total (${fmtNum(rec.savedTon)} ton):</strong>
+            <div style="margin-top:4px; display:grid; grid-template-columns: repeat(3, 1fr); gap:8px;">
+              <div>
+                <div style="color:var(--color-green); font-weight:600;">${fmtNum(rec.savedTonMix)} ton</div>
+                <div style="font-size:0.7rem; color:var(--color-text-secondary);">melhor mix (K: ${rec.asK.toFixed(2)}→${rec.lpKeff.toFixed(2)})</div>
+              </div>
+              <div>
+                <div style="color:var(--color-blue); font-weight:600;">${fmtNum(rec.savedTonRealloc)} ton</div>
+                <div style="font-size:0.7rem; color:var(--color-text-secondary);">redistribuição (co-prod de outras)</div>
+              </div>
+              <div>
+                <div style="color:${rec.savedTonUnder > 0.5 ? 'var(--color-orange)' : 'var(--color-text-tertiary)'}; font-weight:600;">${fmtNum(rec.savedTonUnder)} ton</div>
+                <div style="font-size:0.7rem; color:var(--color-text-secondary);">entrega ${desvioStr} dentro da banda</div>
+              </div>
+            </div>
           </div>
 
           <div style="margin-top:14px; padding:10px 14px; background:var(--color-blue-light); border-radius:var(--radius-sm); font-size:0.85rem;">
@@ -3744,12 +3854,14 @@
 
     el.innerHTML = `
       <div style="margin-bottom:12px; font-size:0.875rem;">
-        <strong style="color:var(--color-green); font-size:1.05rem;">Top 3 combinam: ${fmtNum(totalSavedTon)} ton/ano ≈ €${fmtNum(totalSavedEur)}/ano</strong>
-        <span style="color:var(--color-text-secondary);"> · Total LP global: ${fmtNum(lpOut.ganhoTon)} ton/ano · €${fmtNum(lpOut.ganhoEur)}/ano</span>
+        <strong style="color:var(--color-green); font-size:1.05rem;">Top 3 robusto: ${fmtNum(totalRobustTon)} ton ≈ €${fmtNum(totalRobustEur)}/ano</strong>
+        ${totalUnderTon > 0.5 ? `<span style="color:var(--color-orange);"> + €${fmtNum(totalUnderEur)}/ano condicional (entrega abaixo do nominal dentro da banda)</span>` : ''}
+        <br>
+        <span style="color:var(--color-text-secondary); font-size:0.85rem;">Total bruto: ${fmtNum(totalSavedTon)} ton · €${fmtNum(totalSavedEur)}/ano · Total LP global: ${fmtNum(lpOut.ganhoTon)} ton · €${fmtNum(lpOut.ganhoEur)}/ano</span>
       </div>
       ${cards}
       <div style="font-size:0.78rem; color:var(--color-text-secondary); padding:12px; background:var(--color-background); border-radius:8px;">
-        ℹ️ <strong>Como ler:</strong> as poupanças vêm de <strong>reduzir main production</strong> destas tábuas (porque outras tábuas as co-produzem como cost). Para ver QUAIS as tábuas que passam a usar estas como cost, vê a Vista LP completa abaixo. <strong>Limitação Fase A:</strong> gama Ø fixa no dominante actual — Fase B trará mais ganhos.
+        ℹ️ <strong>Como ler:</strong> Cada saving está decomposto em 3 fontes — <span style="color:var(--color-green); font-weight:600;">melhor mix</span> (sempre real), <span style="color:var(--color-blue); font-weight:600;">redistribuição</span> (outras tábuas co-produzem esta) e <span style="color:var(--color-orange); font-weight:600;">entrega menor dentro da banda</span> (condicional à tolerância aceite — ver Premissas). O <strong>ganho robusto</strong> é mix+redistribuição (não depende de under-delivery). <strong>Limitação Fase A:</strong> gama Ø fixa no dominante actual — Fase B trará mais ganhos.
       </div>
     `;
   }
