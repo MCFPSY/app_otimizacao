@@ -3445,11 +3445,40 @@
     const totalSavedTon = top3.reduce((s, c) => s + c.savedTon, 0);
     const totalSavedEur = top3.reduce((s, c) => s + c.savedEur, 0);
     if (totalEl) totalEl.innerHTML = `<strong>Top 3: ${fmtNum(totalSavedTon)} ton/ano · €${fmtNum(totalSavedEur)}/ano</strong>`;
+    // Para cada libertado, calcular K médio (para penalizar slack)
+    function asKofProduct(prodName) {
+      const pp = pairs.find(p => p.tabua === prodName);
+      if (!pp) return null;
+      const tab2 = parseRefDim(prodName);
+      const cost2 = parseRefDim(pp.dominant_costaneiro);
+      if (!tab2 || !cost2 || cost2.length !== tab2.length) return null;
+      const r = calcAprovMedioGama(pp.gama_dominante, tab2.W, tab2.H, cost2.W, cost2.H,
+        Number(engineSettings.kerf_disco_mm), Number(engineSettings.kerf_fita_mm),
+        Number(engineSettings.cap_costaneiros), Number(engineSettings.pi_value));
+      if (r.error) return null;
+      return r.avgK;
+    }
+
     const cards = top3.map((rec, i) => {
       const producers = findCoProducers(rec.tabua);
       // Identificar costaneiros antigos que ficam libertos (eram dominantes destes producers)
       const libertados = new Set();
       producers.forEach(p => { if (p.switchedFrom && p.wasUsingCost) libertados.add(p.wasUsingCost); });
+      // Calcular slack penalty: rolaria que precisaria para produzir o slack dos libertados
+      let libertadoSlackPenalty = 0;
+      const libertadoSlackInfo = [];
+      libertados.forEach(lib => {
+        const slack = slackByTabua[lib] || 0;
+        if (slack > 0.5) {
+          const libK = asKofProduct(lib) || 2.13;
+          const penalty = libK * slack;
+          libertadoSlackPenalty += penalty;
+          libertadoSlackInfo.push({ name: lib, slack, penalty });
+        }
+      });
+      // Net saving = gross saving - slack penalty
+      const netSavedTon = rec.savedTon - libertadoSlackPenalty;
+      const netSavedEur = netSavedTon * preco;
       const producersHtml = producers.length === 0
         ? '<em style="color:var(--color-text-secondary);">Nenhum (ver Vista LP completa)</em>'
         : producers.slice(0, 5).map(p => {
