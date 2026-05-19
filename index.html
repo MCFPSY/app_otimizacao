@@ -3479,6 +3479,8 @@
       // Net saving = gross saving - slack penalty
       const netSavedTon = rec.savedTon - libertadoSlackPenalty;
       const netSavedEur = netSavedTon * preco;
+      const isInflated = libertadoSlackPenalty > 0.5;
+      const grossNetDiff = `<span style="font-size:0.7rem; color:var(--color-orange);">(bruto ${fmtNum(rec.savedTon)} ton − penalty libertados ${fmtNum(libertadoSlackPenalty)} ton)</span>`;
       const producersHtml = producers.length === 0
         ? '<em style="color:var(--color-text-secondary);">Nenhum (ver Vista LP completa)</em>'
         : producers.slice(0, 5).map(p => {
@@ -3508,8 +3510,6 @@
       const slackNote = rec.slack > 0.5
         ? `<div style="margin-top:4px; font-size:0.75rem; color:var(--color-orange);">⚠ Atenção: ${fmtNum(rec.slack)} m³ de demanda não satisfeita (slack) — LP infeasible para esta parte</div>`
         : '';
-      const isInflated = libertadoSlackPenalty > 0.5;
-      const grossNetDiff = `<span style="font-size:0.7rem; color:var(--color-orange);">(bruto ${fmtNum(rec.savedTon)} ton − penalty libertados ${fmtNum(libertadoSlackPenalty)} ton)</span>`;
       return `
         <div style="background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:20px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; gap:12px;">
