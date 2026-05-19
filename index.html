@@ -1727,25 +1727,31 @@
     </div>
 
     <div class="panel" style="border-left:4px solid var(--color-blue);">
-      <div class="panel-title" style="margin-bottom:12px;">📊 Tolerância de demanda (±%) — racional e implicação no LP</div>
+      <div class="panel-title" style="margin-bottom:12px;">📊 Demanda no LP: piso + folga de over-delivery (+%)</div>
       <p style="line-height:1.7;">
-        Na prática operacional, a entrega de cada referência <strong>nunca é exactamente igual à demanda nominal</strong>: há stocks, há sobra-falta entre meses, e há flexibilidade no plano comercial. Forçar o LP a entregar exactamente <code>supply = D</code> por produto deixa dinheiro em cima da mesa (constraint demasiado apertada) sem ganho operacional real.
+        A demanda nominal de cada referência <strong>é um piso</strong>, não um target negociável. Permitir ao LP entregar abaixo da demanda como forma de "poupar rolaria" seria batota matemática — o LP escolheria sistematicamente reduzir as high-runners (que têm K alto) e isso não corresponde a otimização real, é apenas reduzir o output.
       </p>
       <p style="line-height:1.7; margin-top:10px;">
-        Por isso, cada constraint de demanda no LP é uma <strong>banda</strong>:
+        Formulação correcta:
       </p>
-      <pre style="background:var(--color-background); padding:12px; border-radius:8px; font-size:0.9rem; margin-top:8px; overflow-x:auto;">(1 − tol) · D  ≤  supply  ≤  (1 + tol) · D</pre>
+      <pre style="background:var(--color-background); padding:12px; border-radius:8px; font-size:0.9rem; margin-top:8px; overflow-x:auto;">D  ≤  supply  ≤  (1 + tol) · D</pre>
       <ul style="padding-left:20px; line-height:1.8; margin-top:12px;">
-        <li><strong>Default:</strong> <code>tol = 10%</code> — i.e. o LP pode entregar entre 90% e 110% da demanda nominal de cada produto.</li>
-        <li><strong>Editável:</strong> em <em>Motor → Tolerância de demanda</em>. Aceita 0% (entrega exacta, rigído) até qualquer valor razoável (10–20% operacional típico).</li>
-        <li><strong>Slack:</strong> só fica > 0 quando nem o limite inferior é atingível — i.e. infeasibility real. Aparece com pill vermelha <span class="pill pill-red">⚠ falta</span> na cadeia de cobertura.</li>
-        <li><strong>Onde se vê o efeito:</strong> em <em>Combinações → Vista LP completa → 🔗 Cadeia de cobertura</em>, a coluna "Total entregue" mostra o desvio % vs. demanda nominal de cada produto.</li>
+        <li><strong>Piso:</strong> <code>supply ≥ D</code> — o LP <strong>nunca entrega menos</strong> que a demanda nominal de uma ref.</li>
+        <li><strong>Tecto (folga superior):</strong> <code>supply ≤ (1+tol) · D</code> — over-delivery é permitida até <code>tol%</code>. Default <strong>10%</strong>.
+          Esta folga é necessária porque a <strong>co-produção é geométrica e não escolhe quanto produz</strong> — quando o LP corta 1 m³ de tábua principal, recebe N m³ de costaneiros "de borla" cuja demanda pode já estar coberta.
+        </li>
+        <li><strong>Slack (variável de escape):</strong> só fica > 0 em <strong>infeasibility matemática real</strong> — i.e. nenhum conjunto de combinações viáveis consegue produzir o piso <code>D</code> de uma ref. Penalty 1e6 no objectivo. Aparece com pill vermelha <span class="pill pill-red">⚠ falta</span> na cadeia de cobertura.</li>
+        <li><strong>Editável:</strong> em <em>Motor → Folga de over-delivery</em>. <code>tol = 0%</code> bloqueia totalmente over-delivery (LP tem de bater exactamente D); <code>tol = 10–20%</code> é operacionalmente razoável.</li>
       </ul>
       <p style="line-height:1.7; margin-top:10px;">
-        <strong>Cuidado interpretativo:</strong> uma poupança em rolaria pode vir de (a) melhor mix de combinações para a mesma cesta — saving real, ou (b) entregar menos de algum produto dentro da banda — saving condicional à aceitação operacional do desvio. As recomendações no Top 3 distinguem estes dois tipos.
+        <strong>Fontes válidas de saving (não há outras):</strong>
       </p>
+      <ul style="padding-left:20px; line-height:1.8;">
+        <li><strong>Melhor mix de combinações:</strong> para o mesmo main_prod, escolher cost mais eficiente (K menor) → menos rolaria.</li>
+        <li><strong>Redistribuição:</strong> reduzir main_prod de uma ref quando outras tábuas a co-produzem como cost (a ref continua a ter <code>supply ≥ D</code> via co-produção).</li>
+      </ul>
       <p style="line-height:1.7; margin-top:10px; font-size:0.85rem; color:var(--color-text-secondary);">
-        Quando a tolerância está a 0%, o modelo cai exactamente na versão original com igualdade rígida — útil para baseline comparativa.
+        Decisões estratégicas de produzir <em>menos</em> de alguma ref (e.g. parar uma high-runner por sazonalidade) ficam fora do âmbito do LP daily — devem ser feitas pelo planeador ao alterar o Planeamento, não pelo solver.
       </p>
     </div>
 
@@ -1866,9 +1872,9 @@
           <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Densidade do pinho fresco. Canónico: <strong>0.85</strong>. Usado em todas as conversões m³ rolaria → ton.</div>
         </div>
         <div>
-          <label class="slider-label" for="paramDemandTol">Tolerância de demanda (±%)</label>
+          <label class="slider-label" for="paramDemandTol">Folga de over-delivery (+%)</label>
           <input type="number" id="paramDemandTol" step="0.5" min="0" max="50" class="motor-input">
-          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">O LP pode entregar entre <strong>(1−tol)·D</strong> e <strong>(1+tol)·D</strong> de cada produto. Canónico: <strong>10</strong>%. Permite tirar mais ganhos sem comprometer a cesta na prática operacional.</div>
+          <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:4px;">Constraint LP: <strong>D ≤ supply ≤ (1+tol)·D</strong>. Demanda é piso, over-delivery é folga (até <code>tol%</code>) absorvida quando a co-produção excede o necessário. <strong>Não permite under-delivery</strong> — saving viria de batota matemática. Canónico: <strong>10</strong>%.</div>
         </div>
       </div>
 
@@ -3258,9 +3264,14 @@
       }
     });
 
-    // Constraints de demanda — banda de tolerância [(1-TOL)·D, (1+TOL)·D]
-    // O LP pode entregar até TOL% acima ou abaixo da demanda nominal.
-    // Slack absorve infeasibility (quando nem (1-TOL)·D é atingível) e está penalizado.
+    // Constraints de demanda — DEMANDA NOMINAL É PISO, over-delivery é folga
+    //   supply_p ≥ D_p                    (NUNCA entregar menos que a demanda)
+    //   supply_p ≤ (1 + TOL_OVER) × D_p   (folga superior — natural via co-produção)
+    // Slack absorve infeasibility matemática verdadeira (raro: nenhuma combinação
+    // viável consegue produzir D_p para a ref). Penalty 1e6.
+    //
+    // Nota: NÃO permitimos under-delivery como alavanca de saving. Isso seria
+    // "roubar produção a high-runners" e não corresponde a otimização real.
     let nProductsWithDemand = 0;
     const demandBands = {};  // {prod: {Dmin, D, Dmax}}
     for (const prod of productSet) {
@@ -3270,12 +3281,12 @@
       const D = Number(demandMap.get(prod) || 0);
       if (D <= 0) continue;
       nProductsWithDemand++;
-      const Dmin = D * (1 - TOL);
-      const Dmax = D * (1 + TOL);
+      const Dmin = D;                  // PISO: nunca entregar menos
+      const Dmax = D * (1 + TOL);      // TECTO: over-delivery limitada a +TOL%
       demandBands[prod] = { D, Dmin, Dmax };
-      // Range: min (sem slack faz shortfall infeasible) + max
       model.constraints[key] = { min: Dmin, max: Dmax };
-      // Slack: absorve quando (1-TOL)·D não é atingível
+      // Slack: contribui POSITIVAMENTE para a constraint (compensa shortfall).
+      // Penalty 1e6 garante que LP só o usa em infeasibility real.
       const slackName = `slack_${prod}`;
       model.variables[slackName] = { rolaria: 1e6, [key]: 1 };
     }
@@ -3483,10 +3494,10 @@
         coverageHtml = `
         <details style="margin-top:16px;" open>
           <summary style="cursor:pointer; font-weight:600; font-size:0.9rem; padding:8px 0;">
-            🔗 Cadeia de cobertura — banda de demanda ±${tolPct.toFixed(1)}%
+            🔗 Cadeia de cobertura — demanda como piso · over-delivery até +${tolPct.toFixed(1)}%
           </summary>
           <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-bottom:8px;">
-            O LP pode entregar entre <strong>(1−${tolPct.toFixed(0)}%)·D</strong> e <strong>(1+${tolPct.toFixed(0)}%)·D</strong> de cada produto. Coluna <strong>Total entregue</strong> mostra a soma main+co+slack e o desvio % vs. demanda nominal. Se aparecer <span class="pill pill-red">falta</span> o LP nem o limite inferior conseguiu cumprir — esse défice é deduzido da poupança.
+            <strong>Constraint LP: D ≤ supply ≤ (1+${tolPct.toFixed(0)}%)·D</strong>. Total entregue ≥ demanda nominal sempre (não há "roubo"). Pode haver over-delivery natural quando a co-produção excede a demanda do cost. Se aparecer <span class="pill pill-red">falta</span> houve infeasibility matemática — o LP não conseguiu produzir D mesmo com slack.
           </div>
           <div class="table-wrap">
             <table class="data">
@@ -3531,7 +3542,7 @@
       </div>
       ${coverageHtml}
       <div class="banner banner-info" style="margin-top:16px; font-size:0.8125rem;">
-        ✓ <strong>LP global coordenado:</strong> sem double-counting da demanda. Banda de tolerância <strong>±${(out.tolPct||0).toFixed(1)}%</strong> activa por produto · densidade rolaria <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>. <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
+        ✓ <strong>LP global coordenado:</strong> demanda como piso (<code>D ≤ supply</code>), over-delivery até <strong>+${(out.tolPct||0).toFixed(1)}%</strong> · densidade rolaria <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>. <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
       </div>
     `;
 
@@ -3557,20 +3568,21 @@
     const preco = Number(engineSettings.preco_eur_ton);
     const demandMap = await loadDemandMap();
 
-    // Slack absorve demanda não satisfeita (infeasibility). Detectar para NÃO contar como savings.
+    // Slack absorve demanda não satisfeita (infeasibility matemática real). Penalty 1e6 no LP.
     const slackByTabua = {};
     (lpOut.shortfalls || []).forEach(s => { slackByTabua[s.product] = s.shortfall; });
 
-    // Per-tábua saving = (asK × D_T) − (Σ K_LP × x_LP)
-    // Decomposição honesta em 3 fontes:
-    //   (a) realCoSupply  — m³ desta tábua co-produzidos por OUTRAS (lpOut.coverageChain)
-    //   (b) underDelivery — m³ não entregues dentro da banda de tolerância (não é co-produção)
-    //   (c) lpKeff vs asK — melhoria de K na produção mantida como main
+    // Per-tábua saving — apenas DUAS fontes válidas:
+    //   (a) savingFromMix          = (asK − lpKeff) × mainSupply   (melhor combinação de cost)
+    //   (b) savingFromReallocation = asK × realCoSupply             (outras tábuas co-produzem)
     //
-    // savingTotal = savingFromMix + savingFromReallocation + savingFromUnderDelivery
-    //   savingFromMix         = (asK − lpKeff) × mainSupply        (sempre real)
-    //   savingFromReallocation = asK × realCoSupply                  (redistribuição na cesta — neutro no global)
-    //   savingFromUnderDelivery = asK × underDelivery                (depende de aceitares o desvio)
+    // NÃO há saving por under-delivery: o LP tem constraint supply_p ≥ D_p, portanto
+    // nunca pode "roubar" demanda das refs para poupar rolaria. Se houver slack > 0
+    // significa infeasibility matemática real e é DÉFICE, não saving.
+    //
+    // Pode haver over-delivery (supply_p até (1+tol)·D_p) — mas isso aumenta rolaria,
+    // logo o LP só o faz quando é forçado (co-produção que excede a demanda do cost).
+    // Over-delivery não é saving — é custo extra absorvido pelo sistema.
     const candidatos = [];
     for (const [tabua, grp] of Object.entries(lpOut.byTabua)) {
       const D_T = Number(demandMap.get(tabua) || 0);
@@ -3579,10 +3591,14 @@
       const mainSupply = grp.totalVolume;
       const cv = (lpOut.coverageChain && lpOut.coverageChain[tabua]) || null;
       const realCoSupply = cv ? cv.totalCoSupply : 0;
-      const underDelivery = Math.max(0, D_T - mainSupply - realCoSupply - slack_T);
+      // Total entregue (deve ser ≥ D_T por construção; pode ser > D_T por over-delivery)
+      const totalDelivered = mainSupply + realCoSupply;
+      const overDelivery = Math.max(0, totalDelivered - D_T);
 
-      // Só interessam candidatas com ALGUMA mudança vs AS-IS (main reduzido ou K mudou)
-      if (realCoSupply < 0.5 && underDelivery < 0.5 && Math.abs(D_T - mainSupply) < 0.5) continue;
+      // Só interessam candidatas com ALGUMA mudança vs AS-IS
+      // (main reduzido por causa de realCoSupply, OU K mudou)
+      const mainChange = Math.abs(D_T - mainSupply);
+      if (realCoSupply < 0.5 && mainChange < 0.5) continue;
 
       const p = pairs.find(p => p.tabua === tabua);
       const tab = parseRefDim(tabua);
@@ -3605,48 +3621,34 @@
       const lpRolariaM3 = grp.allocations.reduce((s, a) => s + a.K * a.volume, 0);
       const lpKeff = mainSupply > 0 ? lpRolariaM3 / mainSupply : asK;
 
-      // Decomposição do saving (m³ rolaria)
+      // Decomposição do saving (m³ rolaria) — só duas fontes válidas
       const savingFromMix = (asK - lpKeff) * mainSupply;
       const savingFromReallocation = asK * realCoSupply;
-      const savingFromUnderDelivery = asK * underDelivery;
-      const savedRolariaM3 = savingFromMix + savingFromReallocation + savingFromUnderDelivery;
-      // (= asK * D_T − lpKeff * mainSupply − asK * slack — slack é shortfall, não saving)
+      const savedRolariaM3 = savingFromMix + savingFromReallocation;
 
       const DENSITY_ROLARIA = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
       const savedTon = savedRolariaM3 * DENSITY_ROLARIA;
       const savedEur = savedTon * preco;
       const savedTonMix = savingFromMix * DENSITY_ROLARIA;
       const savedTonRealloc = savingFromReallocation * DENSITY_ROLARIA;
-      const savedTonUnder = savingFromUnderDelivery * DENSITY_ROLARIA;
 
-      // "Saving robusto" = independente de aceitares under-delivery
-      const robustSavedTon = savedTonMix + savedTonRealloc;
-      const robustSavedEur = robustSavedTon * preco;
       // Tipo dominante (para badge)
-      const totals = [
-        { kind: 'mix', val: savedTonMix },
-        { kind: 'realloc', val: savedTonRealloc },
-        { kind: 'under', val: savedTonUnder },
-      ].sort((a,b) => b.val - a.val);
-      const dominant = totals[0].kind;
-      const underPctOfTotal = savedTon > 0.001 ? (savedTonUnder / savedTon) : 0;
+      const dominant = savedTonMix >= savedTonRealloc ? 'mix' : 'realloc';
 
       candidatos.push({
         tabua, D_T,
         mainProdLP: mainSupply,
-        realCoSupply, underDelivery, slack: slack_T,
+        realCoSupply, overDelivery, slack: slack_T,
         asIsAprov, weightedAprov: grp.weightedAprov,
         asK, lpKeff,
         asRolariaM3: asK * D_T, lpRolariaM3, savedRolariaM3,
         savedTon, savedEur,
-        savedTonMix, savedTonRealloc, savedTonUnder,
-        robustSavedTon, robustSavedEur,
-        dominant, underPctOfTotal,
+        savedTonMix, savedTonRealloc,
+        dominant,
         allocations: grp.allocations,
       });
     }
-    // Ordenar por saving robusto (mix + realloc) — under-delivery é tie-breaker, não dominante
-    candidatos.sort((a, b) => (b.robustSavedTon - a.robustSavedTon) || (b.savedTon - a.savedTon));
+    candidatos.sort((a, b) => b.savedTon - a.savedTon);
     const top3 = candidatos.slice(0, 3);
 
     // Quem produz este cost como co-produto? Inclui também o AS-IS dominante deles (cadeia)
@@ -3681,11 +3683,7 @@
     }
     const totalSavedTon = top3.reduce((s, c) => s + c.savedTon, 0);
     const totalSavedEur = top3.reduce((s, c) => s + c.savedEur, 0);
-    const totalRobustTon = top3.reduce((s, c) => s + c.robustSavedTon, 0);
-    const totalRobustEur = top3.reduce((s, c) => s + c.robustSavedEur, 0);
-    const totalUnderTon = top3.reduce((s, c) => s + c.savedTonUnder, 0);
-    const totalUnderEur = totalUnderTon * preco;
-    if (totalEl) totalEl.innerHTML = `<strong>Top 3 robusto: ${fmtNum(totalRobustTon)} ton · €${fmtNum(totalRobustEur)}/ano</strong>${totalUnderTon > 0.5 ? ` <span style="color:var(--color-orange); font-size:0.85rem;">+ €${fmtNum(totalUnderEur)} condicional</span>` : ''}`;
+    if (totalEl) totalEl.innerHTML = `<strong>Top 3: ${fmtNum(totalSavedTon)} ton/ano · €${fmtNum(totalSavedEur)}/ano</strong>`;
     // Para cada libertado, calcular K médio (para penalizar slack)
     function asKofProduct(prodName) {
       const pp = pairs.find(p => p.tabua === prodName);
@@ -3754,26 +3752,28 @@
         ? `<div style="margin-top:4px; font-size:0.75rem; color:var(--color-orange);">⚠ Atenção: ${fmtNum(rec.slack)} m³ de demanda não satisfeita (slack) — LP infeasible para esta parte</div>`
         : '';
 
-      // Total entregue e desvio % vs nominal
+      // Net saving = bruto − slack penalty (caso haja libertados infeasible)
+      const netSavedTon = rec.savedTon - libertadoSlackPenalty;
+      const netSavedEur = netSavedTon * preco;
+
+      // Total entregue: deve ser ≥ D_T (por construção da constraint). Over-delivery possível.
       const totalEntregue = rec.mainProdLP + rec.realCoSupply;
-      const desvioPct = ((totalEntregue - rec.D_T) / rec.D_T * 100);
-      const desvioStr = `${desvioPct >= 0 ? '+' : ''}${desvioPct.toFixed(1)}%`;
+      const overPct = ((totalEntregue - rec.D_T) / rec.D_T * 100);
+      const overStr = overPct >= 0.5 ? `+${overPct.toFixed(1)}%` : (overPct <= -0.5 ? `${overPct.toFixed(1)}% (slack)` : '≈ nominal');
 
       // Pill de origem do saving
       const kindLabel = {
         mix: { txt: 'melhor mix de combinações', cls: 'pill-green' },
         realloc: { txt: 'redistribuição para outras tábuas', cls: 'pill-blue' },
-        under: { txt: `entrega ${desvioStr} vs nominal (dentro da banda)`, cls: 'pill-orange' },
       }[rec.dominant] || { txt: 'misto', cls: 'pill-grey' };
-      const undersharePct = (rec.underPctOfTotal * 100).toFixed(0);
 
-      // TO-BE descrição: distinguir co-prod real de under-delivery
+      // TO-BE descrição
       const tobeBreakdown = [];
       tobeBreakdown.push(`<strong>${fmtNum(rec.mainProdLP)} m³</strong> main`);
-      if (rec.realCoSupply > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-blue)">${fmtNum(rec.realCoSupply)} m³</strong> co-prod de outras`);
-      if (rec.underDelivery > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-orange)">−${fmtNum(rec.underDelivery)} m³</strong> menor entrega (banda)`);
-      if (rec.slack > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-red)">−${fmtNum(rec.slack)} m³</strong> shortfall`);
-      const tobeStr = tobeBreakdown.join(' + ').replace(/\+ −/g,'− ');
+      if (rec.realCoSupply > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-blue)">+ ${fmtNum(rec.realCoSupply)} m³</strong> co-prod de outras`);
+      if (rec.overDelivery > 0.5) tobeBreakdown.push(`<small style="color:var(--color-text-secondary);">(+ ${fmtNum(rec.overDelivery)} m³ over-delivery natural)</small>`);
+      if (rec.slack > 0.5) tobeBreakdown.push(`<strong style="color:var(--color-red)">− ${fmtNum(rec.slack)} m³</strong> shortfall (infeasibility)`);
+      const tobeStr = tobeBreakdown.join(' ');
 
       return `
         <div style="background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:20px; margin-bottom:16px;">
@@ -3782,22 +3782,16 @@
               <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">#${i+1} TÁBUA</div>
               <div style="font-size:1.25rem; font-weight:700; margin-top:2px;">${rec.tabua}</div>
               <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-top:4px;">
-                Demanda nominal: <strong>${fmtNum(rec.D_T)} m³/ano</strong>
+                Demanda nominal: <strong>${fmtNum(rec.D_T)} m³/ano</strong> · Entregue: <strong>${fmtNum(totalEntregue)} m³</strong>
               </div>
               <div style="margin-top:6px;">
                 <span class="pill ${kindLabel.cls}">Origem do ganho: ${kindLabel.txt}</span>
               </div>
             </div>
             <div style="text-align:right;">
-              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">GANHO ROBUSTO</div>
-              <div style="font-size:1.5rem; font-weight:700; color:var(--color-green);">€${fmtNum(rec.robustSavedEur)}/ano</div>
-              <div style="font-size:0.7rem; color:var(--color-text-secondary);">${fmtNum(rec.robustSavedTon)} ton — só mix + redistribuição</div>
-              ${rec.savedTonUnder > 0.5 ? `
-                <div style="margin-top:6px; padding-top:6px; border-top:1px solid var(--color-border-soft);">
-                  <div style="font-size:0.7rem; color:var(--color-orange);">+ ganho condicional (under-delivery)</div>
-                  <div style="font-size:0.95rem; font-weight:600; color:var(--color-orange);">+€${fmtNum(rec.savedTonUnder * preco)}/ano</div>
-                  <div style="font-size:0.7rem; color:var(--color-text-secondary);">${fmtNum(rec.savedTonUnder)} ton — depende de aceitares entregar ${fmtNum(rec.underDelivery)} m³ a menos</div>
-                </div>` : ''}
+              <div style="font-size:0.75rem; color:var(--color-text-tertiary); letter-spacing:0.05em;">GANHO NET</div>
+              <div style="font-size:1.5rem; font-weight:700; color:${netSavedTon > 0 ? 'var(--color-green)' : 'var(--color-red)'};">€${fmtNum(netSavedEur)}/ano</div>
+              <div style="font-size:0.8125rem; color:var(--color-text-secondary);">${fmtNum(netSavedTon)} ton rolaria poupada</div>
               ${isInflated ? `<div style="margin-top:4px;">${grossNetDiff}</div>` : ''}
             </div>
           </div>
@@ -3818,7 +3812,7 @@
               <div style="margin-top:6px; font-size:0.9rem;">${tobeStr}</div>
               <div style="margin-top:4px; font-size:0.8125rem;">
                 Total entregue: <strong>${fmtNum(totalEntregue)} m³</strong>
-                <span style="color:${Math.abs(desvioPct) < 0.5 ? 'var(--color-text-secondary)' : (desvioPct < 0 ? 'var(--color-orange)' : 'var(--color-blue)')}; font-size:0.75rem;">(${desvioStr})</span>
+                <span style="color:${Math.abs(overPct) < 0.5 ? 'var(--color-text-secondary)' : 'var(--color-blue)'}; font-size:0.75rem;">(${overStr})</span>
               </div>
               <div style="margin-top:4px; font-size:0.8125rem;">Aprov ponderado: <strong>${aprovToBeStr}</strong> · K: ${rec.lpKeff.toFixed(2)}</div>
               <div style="margin-top:2px; font-size:0.8125rem; color:var(--color-text-secondary);">→ Rolaria input: <strong>${fmtNum(rec.lpRolariaM3)} m³</strong></div>
@@ -3828,7 +3822,7 @@
 
           <div style="margin-top:8px; padding:10px 14px; background:#F9F9FB; border-left:3px solid var(--color-text-tertiary); border-radius:6px; font-size:0.82rem;">
             <strong>Decomposição do saving total (${fmtNum(rec.savedTon)} ton):</strong>
-            <div style="margin-top:4px; display:grid; grid-template-columns: repeat(3, 1fr); gap:8px;">
+            <div style="margin-top:4px; display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
               <div>
                 <div style="color:var(--color-green); font-weight:600;">${fmtNum(rec.savedTonMix)} ton</div>
                 <div style="font-size:0.7rem; color:var(--color-text-secondary);">melhor mix (K: ${rec.asK.toFixed(2)}→${rec.lpKeff.toFixed(2)})</div>
@@ -3836,10 +3830,6 @@
               <div>
                 <div style="color:var(--color-blue); font-weight:600;">${fmtNum(rec.savedTonRealloc)} ton</div>
                 <div style="font-size:0.7rem; color:var(--color-text-secondary);">redistribuição (co-prod de outras)</div>
-              </div>
-              <div>
-                <div style="color:${rec.savedTonUnder > 0.5 ? 'var(--color-orange)' : 'var(--color-text-tertiary)'}; font-weight:600;">${fmtNum(rec.savedTonUnder)} ton</div>
-                <div style="font-size:0.7rem; color:var(--color-text-secondary);">entrega ${desvioStr} dentro da banda</div>
               </div>
             </div>
           </div>
@@ -3854,14 +3844,12 @@
 
     el.innerHTML = `
       <div style="margin-bottom:12px; font-size:0.875rem;">
-        <strong style="color:var(--color-green); font-size:1.05rem;">Top 3 robusto: ${fmtNum(totalRobustTon)} ton ≈ €${fmtNum(totalRobustEur)}/ano</strong>
-        ${totalUnderTon > 0.5 ? `<span style="color:var(--color-orange);"> + €${fmtNum(totalUnderEur)}/ano condicional (entrega abaixo do nominal dentro da banda)</span>` : ''}
-        <br>
-        <span style="color:var(--color-text-secondary); font-size:0.85rem;">Total bruto: ${fmtNum(totalSavedTon)} ton · €${fmtNum(totalSavedEur)}/ano · Total LP global: ${fmtNum(lpOut.ganhoTon)} ton · €${fmtNum(lpOut.ganhoEur)}/ano</span>
+        <strong style="color:var(--color-green); font-size:1.05rem;">Top 3 combinam: ${fmtNum(totalSavedTon)} ton/ano ≈ €${fmtNum(totalSavedEur)}/ano</strong>
+        <span style="color:var(--color-text-secondary);"> · Total LP global: ${fmtNum(lpOut.ganhoTon)} ton/ano · €${fmtNum(lpOut.ganhoEur)}/ano</span>
       </div>
       ${cards}
       <div style="font-size:0.78rem; color:var(--color-text-secondary); padding:12px; background:var(--color-background); border-radius:8px;">
-        ℹ️ <strong>Como ler:</strong> Cada saving está decomposto em 3 fontes — <span style="color:var(--color-green); font-weight:600;">melhor mix</span> (sempre real), <span style="color:var(--color-blue); font-weight:600;">redistribuição</span> (outras tábuas co-produzem esta) e <span style="color:var(--color-orange); font-weight:600;">entrega menor dentro da banda</span> (condicional à tolerância aceite — ver Premissas). O <strong>ganho robusto</strong> é mix+redistribuição (não depende de under-delivery). <strong>Limitação Fase A:</strong> gama Ø fixa no dominante actual — Fase B trará mais ganhos.
+        ℹ️ <strong>Como ler:</strong> Demanda nominal é <strong>piso</strong> (LP nunca entrega menos) — over-delivery limitada a +${(lpOut.tolPct || 0).toFixed(0)}% via co-produção natural. Saving só vem de <span style="color:var(--color-green); font-weight:600;">melhor mix</span> (cost mais eficiente, mesmo main) ou <span style="color:var(--color-blue); font-weight:600;">redistribuição</span> (outras tábuas co-produzem esta ref como cost, libertando main_prod). <strong>Não há saving por entregar menos</strong> — isso seria batota matemática. <strong>Limitação Fase A:</strong> gama Ø fixa no dominante actual — Fase B trará mais ganhos via triagem.
       </div>
     `;
   }
