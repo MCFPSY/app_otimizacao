@@ -2587,26 +2587,41 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       throw new Error(`Sheet '${SHEET}' não encontrada. Folhas: ${wb.SheetNames.join(', ')}`);
     }
     const ws = wb.Sheets[SHEET];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
-    // Layout 2º pivot (1-indexed):
-    //   linha 56: anos (E..U)
-    //   linha 57: meses (E..U)
-    //   linhas 58+: empresa | pais | designacao | moeda | <valores por mês>
-    //   acaba quando aparece "Total" (e.g. "ES Total", "PT Total", "MCF Total", "Total Geral")
-    // 0-indexed: linha 56 idx=55, linha 57 idx=56, dados a partir idx=57
+    // blankrows: true mantém alinhamento entre o índice do array e a linha do Excel
+    // (caso contrário as linhas em branco entre pivot 1 e pivot 2 desalinham os índices)
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true, raw: true });
 
-    const ROW_YEARS = 55;   // linha 56
-    const ROW_MONTHS = 56;  // linha 57
+    // Detectar dinamicamente o 2º pivot: a primeira ocorrência de "Sum of P.U." é o pivot 1;
+    // procurar uma SEGUNDA ocorrência → essa marca o início do pivot 2.
+    // Estrutura esperada após essa âncora:
+    //   âncora+1 → linha dos anos (E..U)
+    //   âncora+2 → linha dos meses + headers "Empresa, Pais, Designacao, Moeda"
+    //   âncora+3..N → dados
+    let anchor = -1;
+    let sumOfCount = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const cell0 = r && r[0];
+      if (cell0 && typeof cell0 === 'string' && /^Sum of/i.test(cell0)) {
+        sumOfCount++;
+        if (sumOfCount === 2) { anchor = i; break; }
+      }
+    }
+    if (anchor < 0) {
+      throw new Error('Não foi encontrado 2º pivot "Sum of P.U.". Verifica estrutura do ficheiro.');
+    }
+    const ROW_YEARS = anchor + 1;
+    const ROW_MONTHS = anchor + 2;
     const COL_EMPRESA = 0;
     const COL_PAIS = 1;
     const COL_DESIG = 2;
     const COL_MOEDA = 3;
-    const FIRST_VAL_COL = 4;  // E (idx 4) — primeiro mês
+    const FIRST_VAL_COL = 4;
 
     const years = rows[ROW_YEARS] || [];
     const months = rows[ROW_MONTHS] || [];
     if (!years[FIRST_VAL_COL] || !months[FIRST_VAL_COL]) {
-      throw new Error('Cabeçalhos de ano/mês ausentes na linha 56/57.');
+      throw new Error(`Cabeçalhos ano/mês ausentes nas linhas ${ROW_YEARS+1}/${ROW_MONTHS+1} (anchor=Sum of P.U. na linha ${anchor+1}).`);
     }
 
     const items = [];
