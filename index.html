@@ -1540,11 +1540,11 @@
       <div class="upload-card" data-source="compras">
         <div class="upload-icon">📦</div>
         <div class="upload-title">Compras de rolaria</div>
-        <div class="upload-meta">.xlsx · long-form · jan/2025 onwards</div>
+        <div class="upload-meta">.xlsx · auto-detect: <strong>Evol Ent Mad</strong> (volumes) ou <strong>Historico compras por gama</strong> (preços)</div>
         <label class="upload-drop">
           <input type="file" accept=".xlsx,.xlsm,.csv" hidden>
           <span class="upload-cta">Escolher ficheiro</span>
-          <span class="upload-hint">ou arrasta para aqui</span>
+          <span class="upload-hint">precisas dos dois — um de cada vez</span>
         </label>
         <div class="upload-status" data-status>Sem ficheiro</div>
       </div>
@@ -2338,6 +2338,46 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         showParseError('Produção: ' + err.message);
         if (statusEl) statusEl.innerHTML = `<span class="pill pill-red">✗</span> Erro: ${err.message}`;
       }
+    } else if (source === 'compras') {
+      const statusEl = card.querySelector('[data-status]');
+      const showProgress = (msg) => { if (statusEl) statusEl.innerHTML = `<span class="pill pill-blue">⏳</span> ${msg}`; };
+      try {
+        const det = await parseComprasAuto(file, showProgress);
+        let summaryHtml = '';
+        if (det.kind === 'volumes') {
+          const { volumes, paisShare } = det.result;
+          const n = await saveComprasVolumes(volumes, paisShare);
+          const totalTon = volumes.reduce((s, v) => s + Number(v.ton || 0), 0);
+          statusEl.innerHTML = `<span class="pill pill-green">✓</span> Volumes: ${n} buckets · ${fmtNum(totalTon)} ton`;
+          summaryHtml = `
+            <div class="panel-title">✓ Volumes de compras parseados — ${n} buckets (comp × gama)</div>
+            <div class="panel-subtitle">Total 2025: <strong>${fmtNum(totalTon)} ton</strong> · Share país: PT <strong>${(paisShare.share_pt*100).toFixed(1)}%</strong> · ES <strong>${(paisShare.share_es*100).toFixed(1)}%</strong></div>`;
+        } else if (det.kind === 'precos') {
+          const items = det.result;
+          const n = await saveComprasPrecos(items);
+          statusEl.innerHTML = `<span class="pill pill-green">✓</span> Preços: ${n} linhas`;
+          const years = [...new Set(items.map(i => i.ano))].sort();
+          summaryHtml = `
+            <div class="panel-title">✓ Preços de compras parseados — ${n} linhas</div>
+            <div class="panel-subtitle">Anos: ${years.join(', ')} · ${[...new Set(items.map(i => `${i.comprimento_mm}×${i.gama_compras}`))].length} (comprimento × gama) distintos</div>`;
+        }
+        // Preview no painel inferior
+        const previewEl = document.getElementById('parsePreview');
+        if (previewEl && summaryHtml) {
+          previewEl.innerHTML = `
+            <div class="panel" style="border-left:4px solid var(--color-green);">
+              <div class="panel-header">
+                <div>${summaryHtml}</div>
+                <span class="pill pill-green">Parser + DB OK</span>
+              </div>
+            </div>`;
+          previewEl.style.display = 'block';
+        }
+      } catch (err) {
+        console.error('Parse compras falhou:', err);
+        showParseError('Compras: ' + err.message);
+        if (statusEl) statusEl.innerHTML = `<span class="pill pill-red">✗</span> Erro: ${err.message}`;
+      }
     }
   }
 
@@ -2392,6 +2432,248 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     const { error: insErr } = await sb.from('planeamento_demanda').insert(rows);
     if (insErr) throw new Error('Falha a inserir: ' + insErr.message);
     return rows.length;
+  }
+
+  // ===== Fase B: Parsers Compras (auto-detect file type by sheet name) =====
+  //
+  // Ficheiro A — "05. MCF - Evol. Ent. Mad. (mai26).xlsx" / sheet "03. Evolução Mensal"
+  //   → volumes anuais por (comp × gama) em ton (linhas 15-30) + share país (linhas 36-37)
+  //   → grava em compras_volumes + compras_pais_share
+  //
+  // Ficheiro B — "Historico compras por gama.xlsx" / sheet "Wood_Trend_YOY"
+  //   → preços mensais por (designação × empresa × país) — 2º pivot a partir da linha 51
+  //   → grava em compras_precos
+
+  // Mapping comprimento string → mm
+  function compStrToMm(s) {
+    if (!s) return null;
+    const t = String(s).trim().toLowerCase().replace(',', '.');
+    if (t.startsWith('2.12')) return 2100;
+    if (t.startsWith('2.52')) return 2500;
+    if (t.startsWith('2.55')) return 2500;  // variant
+    if (t.startsWith('2.6'))  return 2600;
+    if (t.startsWith('2.40')) return 2400;
+    if (t.startsWith('2.75')) return 2750;
+    return null;
+  }
+
+  // Mapping gama string (varia entre ficheiros) → canonical
+  function gamaCanonical(s) {
+    if (!s) return null;
+    const t = String(s).toUpperCase();
+    if (/CANTER/.test(t)) return 'CANTER';
+    if (/25\s*A?C?(ima)?/.test(t) || /\/25\b/.test(t)) return '≥25AC';
+    if (/15\s*A?C?(ima)?/.test(t) || /\/15\b/.test(t)) return '≥15AC';
+    return null;
+  }
+
+  // Parse designação completa (ficheiro B) → { comp, gama }
+  // Exemplo: "Rolaria de Pinho 2,52/25 Acima (100% certif PEFC)" → { comp:2500, gama:'≥25AC' }
+  function parseDesignacao(d) {
+    if (!d) return { comp: null, gama: null };
+    const s = String(d);
+    // Comprimento: 2,12 | 2,52 | 2,60 | 2,55 | 2,75
+    const mComp = s.match(/(\d),(\d{1,2})/);
+    const comp = mComp ? compStrToMm(mComp[0]) : null;
+    const gama = gamaCanonical(s);
+    return { comp, gama };
+  }
+
+  async function parseComprasVolumes(file, progressCb) {
+    if (progressCb) progressCb('A ler ficheiro de volumes...');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    const SHEET = '03. Evolução Mensal';
+    if (!wb.SheetNames.includes(SHEET)) {
+      throw new Error(`Sheet '${SHEET}' não encontrada. Folhas: ${wb.SheetNames.join(', ')}`);
+    }
+    const ws = wb.Sheets[SHEET];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
+    // Layout esperado (1-indexed):
+    //   col E = label, col F = unidade, col G=2023, col H=2024, col I=2025, col J=2026
+    //   linhas:
+    //     15 "2,12 m" (total)
+    //     16-18 sub-gamas (≥15 AC, ≥CANTER, ≥25 AC)
+    //     19 "2,52 m" (total) | 20-22 sub-gamas
+    //     23 "2,60 m" | 24-26 sub-gamas
+    //     27 "2,75 m" | 28-30 sub-gamas
+    //     36 "Nacional" %
+    //     37 "Espanha" %
+    // Em 0-indexed: subtrair 1 às linhas e usar índice 0-based para colunas
+    // col E = idx 4, F = 5, G = 6, H = 7, I = 8, J = 9 (year 2025 está em I)
+
+    const COL_LABEL = 4;
+    const COL_2025  = 8;
+    const items = [];
+    let currentComp = null;
+    let nationalShare = null, spanishShare = null;
+
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const label = row[COL_LABEL];
+      if (!label) continue;
+      const labelStr = String(label).trim();
+      const v2025 = row[COL_2025];
+
+      // Detectar linha de comprimento (ex: "2,12 m")
+      const compMatch = labelStr.match(/^(\d),(\d{1,2})\s*m$/i);
+      if (compMatch) {
+        currentComp = compStrToMm(`${compMatch[1]},${compMatch[2]}`);
+        continue;
+      }
+
+      // Detectar sub-linha de gama (≥15 AC, ≥CANTER, ≥25 AC)
+      // Caracter ≥ pode ser substituído por outros em encoding (▲ ou similar). Verificar por keyword.
+      if (currentComp != null) {
+        const gama = gamaCanonical(labelStr);
+        if (gama && v2025 != null && !isNaN(Number(v2025))) {
+          const ton = Number(v2025);
+          if (ton > 0) {
+            items.push({ ano: 2025, comprimento_mm: currentComp, gama_compras: gama, ton, source_row: r + 1 });
+          }
+        }
+      }
+
+      // Detectar linhas de share país (independentemente do currentComp)
+      const labelLower = labelStr.toLowerCase();
+      if (labelLower.startsWith('nacional') && v2025 != null) {
+        nationalShare = Number(v2025);
+      } else if ((labelLower.startsWith('espanha') || labelLower.startsWith('españa')) && v2025 != null) {
+        spanishShare = Number(v2025);
+      }
+    }
+
+    if (items.length === 0) {
+      throw new Error('Nenhuma linha de volume parseada — verifica estrutura do ficheiro.');
+    }
+    if (progressCb) progressCb(`${items.length} linhas volume + share país=${nationalShare?.toFixed(3)}/${spanishShare?.toFixed(3)}`);
+    return { volumes: items, paisShare: { share_pt: nationalShare, share_es: spanishShare } };
+  }
+
+  async function saveComprasVolumes(volumes, paisShare) {
+    // Apaga 2025 antes de inserir (replace strategy)
+    await sb.from('compras_volumes').delete().eq('ano', 2025);
+    const { error: insErr } = await sb.from('compras_volumes').insert(volumes);
+    if (insErr) throw new Error('Insert volumes falhou: ' + insErr.message);
+    // Upsert share país
+    if (paisShare && paisShare.share_pt != null && paisShare.share_es != null) {
+      const { error: shErr } = await sb.from('compras_pais_share')
+        .upsert({ ano: 2025, share_pt: paisShare.share_pt, share_es: paisShare.share_es });
+      if (shErr) console.warn('Falha share país:', shErr.message);
+    }
+    return volumes.length;
+  }
+
+  async function parseComprasPrecos(file, progressCb) {
+    if (progressCb) progressCb('A ler ficheiro de preços...');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    const SHEET = 'Wood_Trend_YOY';
+    if (!wb.SheetNames.includes(SHEET)) {
+      throw new Error(`Sheet '${SHEET}' não encontrada. Folhas: ${wb.SheetNames.join(', ')}`);
+    }
+    const ws = wb.Sheets[SHEET];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
+    // Layout 2º pivot (1-indexed):
+    //   linha 56: anos (E..U)
+    //   linha 57: meses (E..U)
+    //   linhas 58+: empresa | pais | designacao | moeda | <valores por mês>
+    //   acaba quando aparece "Total" (e.g. "ES Total", "PT Total", "MCF Total", "Total Geral")
+    // 0-indexed: linha 56 idx=55, linha 57 idx=56, dados a partir idx=57
+
+    const ROW_YEARS = 55;   // linha 56
+    const ROW_MONTHS = 56;  // linha 57
+    const COL_EMPRESA = 0;
+    const COL_PAIS = 1;
+    const COL_DESIG = 2;
+    const COL_MOEDA = 3;
+    const FIRST_VAL_COL = 4;  // E (idx 4) — primeiro mês
+
+    const years = rows[ROW_YEARS] || [];
+    const months = rows[ROW_MONTHS] || [];
+    if (!years[FIRST_VAL_COL] || !months[FIRST_VAL_COL]) {
+      throw new Error('Cabeçalhos de ano/mês ausentes na linha 56/57.');
+    }
+
+    const items = [];
+    for (let r = ROW_MONTHS + 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const empresa = row[COL_EMPRESA];
+      const pais = row[COL_PAIS];
+      const desig = row[COL_DESIG];
+      if (!empresa) break;  // fim do pivot
+      const empStr = String(empresa).trim();
+      // Skip total rows
+      if (empStr.toLowerCase().includes('total')) continue;
+      if (!pais || !desig) continue;
+      const paisStr = String(pais).trim();
+      if (paisStr.toLowerCase().includes('total')) continue;
+      const desigStr = String(desig).trim();
+      const { comp, gama } = parseDesignacao(desigStr);
+      if (!comp || !gama) continue;
+
+      // Normalizar país
+      let paisNorm = 'OUTRO';
+      if (paisStr === 'PT') paisNorm = 'PT';
+      else if (paisStr === 'ES') paisNorm = 'ES';
+
+      // Iterar colunas de valor
+      for (let c = FIRST_VAL_COL; c < years.length; c++) {
+        const yr = years[c];
+        const mo = months[c];
+        const val = row[c];
+        if (val == null || isNaN(Number(val))) continue;
+        const eur = Number(val);
+        if (eur <= 0 || eur > 200) continue;  // sanity
+        if (yr == null || mo == null || mo === 'Total Geral') continue;
+        const yrNum = Number(yr);
+        const moNum = Number(mo);
+        if (!Number.isInteger(yrNum) || !Number.isInteger(moNum) || moNum < 1 || moNum > 12) continue;
+        items.push({
+          ano: yrNum, mes: moNum,
+          comprimento_mm: comp,
+          gama_compras: gama,
+          pais: paisNorm,
+          eur_per_ton: eur,
+          designacao_orig: desigStr.slice(0, 200),
+        });
+      }
+    }
+
+    if (items.length === 0) {
+      throw new Error('Nenhuma linha de preço parseada — verifica estrutura do 2º pivot.');
+    }
+    if (progressCb) progressCb(`${items.length} linhas de preço parseadas`);
+    return items;
+  }
+
+  async function saveComprasPrecos(items) {
+    // Replace all (mais simples; tabela é pequena)
+    await sb.from('compras_precos').delete().gte('id', 0);
+    const BATCH = 500;
+    for (let i = 0; i < items.length; i += BATCH) {
+      const slice = items.slice(i, i + BATCH);
+      const { error } = await sb.from('compras_precos').insert(slice);
+      if (error) throw new Error('Insert preços falhou: ' + error.message);
+    }
+    return items.length;
+  }
+
+  // Auto-detect: lê 1 vez para ver sheet names, decide parser
+  async function parseComprasAuto(file, progressCb) {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    const sheets = wb.SheetNames;
+    if (sheets.includes('03. Evolução Mensal') || sheets.some(s => /Evolu/.test(s))) {
+      // Re-parse via parser de volumes (precisa o file inteiro outra vez — passar file works)
+      return { kind: 'volumes', result: await parseComprasVolumes(file, progressCb) };
+    }
+    if (sheets.includes('Wood_Trend_YOY')) {
+      return { kind: 'precos', result: await parseComprasPrecos(file, progressCb) };
+    }
+    throw new Error(`Ficheiro não reconhecido. Folhas: ${sheets.join(', ')}`);
   }
 
   // Ler da BD: usado ao carregar a página e após upload
