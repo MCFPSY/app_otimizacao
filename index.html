@@ -1297,21 +1297,6 @@
       </div>
     </details>
 
-    <!-- Marco 5.4: Recomendações TO-BE greedy (colapsada — referência) -->
-    <details style="margin-bottom:24px;">
-      <summary style="cursor:pointer; padding:12px 16px; background:var(--color-background); border-radius:8px; font-weight:600; font-size:0.9rem;">💡 TO-BE greedy per-tábua (referência — substituído pelo LP)</summary>
-    <div class="panel panel-accent-blue" id="toBePanel" style="border-left:4px solid var(--color-blue); opacity:0.85; margin-top:12px;">
-      <div class="panel-header">
-        <div>
-          <div class="panel-title">💡 Recomendações TO-BE — greedy per-tábua <span style="font-size:0.75rem; color:var(--color-text-tertiary); font-weight:400;">(referência — substituído pelo LP acima)</span></div>
-          <div class="panel-subtitle">Para cada par actual (AS-IS), testa candidatos do <strong>mesmo comprimento</strong> da tábua (constraint operacional: tábua e costaneiros vêm do mesmo tronco → mesmo comprimento) e propõe o costaneiro com melhor aproveitamento para a mesma tábua + gama Ø. Ordenado por €/ano.</div>
-        </div>
-        <span class="pill pill-blue" id="toBeTotal">—</span>
-      </div>
-      <div id="toBeContent" style="margin-top:8px;">A calcular...</div>
-    </div>
-    </details>
-
     <!-- Marco 5.3: Pares reais detectados a partir da produção -->
     <details style="margin-bottom:24px;">
       <summary style="cursor:pointer; padding:12px 16px; background:var(--color-background); border-radius:8px; font-weight:600; font-size:0.9rem;">🎯 Pares reais detectados — dados de produção (AS-IS)</summary>
@@ -3857,7 +3842,6 @@
     const { pairs, nTurnos, nDescartados } = detectParesReais(cachedProducaoRows, period);
     lastDetectedPairs = pairs;
     renderParesReais(pairs, nTurnos, nDescartados);
-    renderToBe(pairs);
     // Marco 6 Fase A: LP global
     renderLP(pairs);
   }
