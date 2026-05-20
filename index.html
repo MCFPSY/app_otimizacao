@@ -1651,6 +1651,20 @@
         <li>ES e PT considerados <strong>equivalentes em preço</strong>; manter cota em ambos os países por diluição de risco.</li>
         <li>Madeira certificada tratada igual à normal (não pesa neste exercício).</li>
       </ul>
+      <div style="margin-top:14px; padding:12px 14px; background:var(--color-orange-light); border-left:3px solid var(--color-orange); border-radius:8px; font-size:0.875rem;">
+        <strong style="color:var(--color-orange);">⚖️ Tolerância de mudança de mix de compras: ±15%</strong>
+        <p style="margin-top:6px; line-height:1.6;">
+          O LP pode propor alterar o <strong>mix de compras</strong> de cada gama, mas <strong>limitado a ±15%</strong> do mix actual (Fase C). Esta restrição existe porque:
+        </p>
+        <ul style="padding-left:20px; line-height:1.6; margin-top:6px;">
+          <li>Os fornecedores não conseguem absorver variações grandes de mix de um ano para o outro (lead time, contratos, disponibilidade na floresta).</li>
+          <li>Diversificação de risco entre fornecedores ES/PT exige manter cota em ambos os países.</li>
+          <li>Mudanças maiores são decisões estratégicas multi-anuais — fora do âmbito desta optimização anual.</li>
+        </ul>
+        <p style="margin-top:6px; font-size:0.85rem; color:var(--color-text-secondary);">
+          Constraint formal: para cada gama <code>g</code>, <code>(1−0.15) · compras_actual_g ≤ compras_LP_g ≤ (1+0.15) · compras_actual_g</code>. Valor configurável no Motor (futuro).
+        </p>
+      </div>
     </div>
 
     <div class="panel">
@@ -1662,6 +1676,24 @@
         <li>2750mm: gamas definidas mas <strong>não produzido</strong> — ignorar.</li>
         <li>Última atualização: 2024-03-18 (Eduardo Rocha). Confirmada como atual em 2026-05-14.</li>
       </ul>
+      <div style="margin-top:14px; padding:12px 14px; background:var(--color-red-light); border-left:3px solid var(--color-red); border-radius:8px; font-size:0.875rem;">
+        <strong style="color:var(--color-red);">🚫 Constraint dura — número de gamas por comprimento é FIXO</strong>
+        <p style="margin-top:6px; line-height:1.6;">
+          Não é possível <strong>criar novas gamas</strong> nem <strong>fundir/eliminar</strong> gamas existentes. A topologia da triagem é fixa por dois motivos físicos:
+        </p>
+        <ul style="padding-left:20px; line-height:1.6; margin-top:6px;">
+          <li><strong>Boxes na triagem</strong> são limitadas (uma por gama × comprimento).</li>
+          <li><strong>Parque de madeiras</strong> não tem espaço para gerir piles adicionais.</li>
+        </ul>
+        <p style="margin-top:6px; line-height:1.6;">
+          O que <strong>se pode mexer (Fase D)</strong>: os valores dos <em>cutoffs</em> entre gamas adjacentes. Exemplo válido para 2100mm:
+        </p>
+        <pre style="background:var(--color-background); padding:10px; border-radius:6px; font-size:0.82rem; margin-top:6px; overflow-x:auto;">AS-IS (4 gamas):  &lt;190  |  191-220  |  221-250  |  &gt;250
+TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topologia, cutoffs ajustados</pre>
+        <p style="margin-top:6px; font-size:0.85rem; color:var(--color-text-secondary);">
+          O LP em Fase D vai propor pequenos shifts dos cutoffs (±5–15mm tipicamente) que aumentem o aproveitamento médio sem alterar o número total de boxes.
+        </p>
+      </div>
     </div>
 
     <div class="panel">
