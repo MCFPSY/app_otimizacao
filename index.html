@@ -3752,10 +3752,6 @@
         ? `<div style="margin-top:4px; font-size:0.75rem; color:var(--color-orange);">⚠ Atenção: ${fmtNum(rec.slack)} m³ de demanda não satisfeita (slack) — LP infeasible para esta parte</div>`
         : '';
 
-      // Net saving = bruto − slack penalty (caso haja libertados infeasible)
-      const netSavedTon = rec.savedTon - libertadoSlackPenalty;
-      const netSavedEur = netSavedTon * preco;
-
       // Total entregue: deve ser ≥ D_T (por construção da constraint). Over-delivery possível.
       const totalEntregue = rec.mainProdLP + rec.realCoSupply;
       const overPct = ((totalEntregue - rec.D_T) / rec.D_T * 100);
