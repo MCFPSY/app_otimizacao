@@ -2505,7 +2505,9 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     const COL_LABEL = 4;
     const COL_2025  = 8;
     const items = [];
+    const seen = new Set();           // chaves "comp|gama" já registadas — evita totais agregados duplicarem
     let currentComp = null;
+    let gamasNesteComp = new Set();   // detecta repetição de gama → estamos fora do bloco de comprimentos
     let nationalShare = null, spanishShare = null;
 
     for (let r = 0; r < rows.length; r++) {
@@ -2516,21 +2518,32 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       const labelStr = String(label).trim();
       const v2025 = row[COL_2025];
 
-      // Detectar linha de comprimento (ex: "2,12 m")
+      // Detectar linha de comprimento (ex: "2,12 m") — abre novo bloco
       const compMatch = labelStr.match(/^(\d),(\d{1,2})\s*m$/i);
       if (compMatch) {
         currentComp = compStrToMm(`${compMatch[1]},${compMatch[2]}`);
+        gamasNesteComp = new Set();
         continue;
       }
 
       // Detectar sub-linha de gama (≥15 AC, ≥CANTER, ≥25 AC)
-      // Caracter ≥ pode ser substituído por outros em encoding (▲ ou similar). Verificar por keyword.
       if (currentComp != null) {
         const gama = gamaCanonical(labelStr);
-        if (gama && v2025 != null && !isNaN(Number(v2025))) {
-          const ton = Number(v2025);
-          if (ton > 0) {
-            items.push({ ano: 2025, comprimento_mm: currentComp, gama_compras: gama, ton });
+        if (gama) {
+          // Se a mesma gama aparece 2x para o mesmo currentComp, saímos do bloco:
+          // estamos nas linhas de totais agregados (sem comprimento associado).
+          if (gamasNesteComp.has(gama)) {
+            currentComp = null;
+          } else {
+            gamasNesteComp.add(gama);
+            const key = `${currentComp}|${gama}`;
+            if (!seen.has(key) && v2025 != null && !isNaN(Number(v2025))) {
+              const ton = Number(v2025);
+              if (ton > 0) {
+                items.push({ ano: 2025, comprimento_mm: currentComp, gama_compras: gama, ton });
+                seen.add(key);
+              }
+            }
           }
         }
       }
