@@ -3339,9 +3339,21 @@
         coverageChain[a.tabua].mainSupply += a.volume;
       }
       if (coverageChain[a.cost]) {
-        coverageChain[a.cost].coSupply.push({ fromTabua: a.tabua, m3: a.volume * a.coRatio, viaCost: a.cost });
+        coverageChain[a.cost].coSupply.push({
+          fromTabua: a.tabua,
+          volumeTabua: a.volume,
+          coRatio: a.coRatio,
+          m3: a.volume * a.coRatio,
+          viaCost: a.cost,
+        });
       }
     });
+    // DEBUG: log candidates with coRatio > 0.6 (suspeito) ou anormalidades geométricas
+    const suspectCandidates = candidates.filter(c => c.coRatio > 0.6);
+    if (suspectCandidates.length > 0) {
+      console.warn('[LP] candidates com coRatio > 0.6 (verificar geometria):',
+        suspectCandidates.map(c => `${c.tabua}+${c.cost} coR=${c.coRatio.toFixed(3)} (gama=${c.gama})`));
+    }
     // Marcar libertados: produto que era main no AS-IS (aparece em pairs como tábua) MAS no LP perdeu volume main
     // (i.e., mainSupply < demand → parte é coberta por co-produto/slack)
     const wasMainInAsIs = new Set(pairs.map(p => p.tabua));
@@ -3454,7 +3466,12 @@
           const dev = cv.deviationPct || 0;
           const coDetails = cv.coSupply
             .sort((a, b) => b.m3 - a.m3)
-            .map(c => `<span style="white-space:nowrap;"><strong>${c.fromTabua}</strong> → ${fmtNum(c.m3)} m³</span>`)
+            .map(c => {
+              const ratioBadge = c.coRatio != null
+                ? `<small style="color:${c.coRatio > 0.6 ? 'var(--color-red)' : 'var(--color-text-secondary)'};">(${fmtNum(c.volumeTabua)} m³ × ${c.coRatio.toFixed(3)})</small>`
+                : '';
+              return `<span style="white-space:nowrap;"><strong>${c.fromTabua}</strong> → ${fmtNum(c.m3)} m³ ${ratioBadge}</span>`;
+            })
             .join(' · ');
           const slackChip = cv.slack > 0.5
             ? `<span class="pill pill-red" style="margin-left:6px;">⚠ falta ${fmtNum(cv.slack)} m³ (${slackPct}%)</span>`
