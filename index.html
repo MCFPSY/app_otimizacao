@@ -1282,16 +1282,22 @@
       <div id="top3Content" style="margin-top:12px;">A calcular...</div>
     </div>
 
-    <!-- Marco 6 Fase A: LP Global (vista completa — colapsável) -->
+    <!-- Marco 6: LP Global (vista completa — colapsável, toggle Fase A/B) -->
     <details style="margin-bottom:24px;">
       <summary style="cursor:pointer; padding:12px 16px; background:var(--color-background); border-radius:8px; font-weight:600; font-size:0.9rem;">🧮 Vista LP completa — todas as tábuas (clica para expandir)</summary>
       <div class="panel" id="lpPanel" style="border-left:4px solid var(--color-green); margin-top:12px;">
         <div class="panel-header">
           <div>
-            <div class="panel-title">LP Global (Marco 6 — Fase A) — recomendações coordenadas cross-tábua</div>
-            <div class="panel-subtitle">Minimiza ton rolaria respeitando demanda tábuas + co-produtos costaneiros + length match. Sem double-counting. <strong>Triagem e compra ainda não optimizadas</strong> (Fases B+C).</div>
+            <div class="panel-title" id="lpPanelTitle">LP Global — Fase A (cost mix)</div>
+            <div class="panel-subtitle" id="lpPanelSubtitle">Minimiza ton rolaria · demanda tábuas + co-produtos · sem optimizar compras ou triagem.</div>
           </div>
-          <span class="pill pill-green" id="lpTotal">A calcular...</span>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="display:flex; gap:0; border:1px solid var(--color-border); border-radius:8px; overflow:hidden; font-size:0.85rem; font-weight:600;">
+              <button id="lpPhaseA" class="lp-phase-btn lp-phase-active" data-phase="A" style="padding:6px 14px; border:none; background:var(--color-blue); color:white; cursor:pointer;">Fase A</button>
+              <button id="lpPhaseB" class="lp-phase-btn" data-phase="B" style="padding:6px 14px; border:none; background:transparent; color:var(--color-text-secondary); cursor:pointer; border-left:1px solid var(--color-border);">Fase B</button>
+            </div>
+            <span class="pill pill-green" id="lpTotal">A calcular...</span>
+          </div>
         </div>
         <div id="lpContent" style="margin-top:8px;">A construir modelo LP...</div>
       </div>
@@ -3874,18 +3880,92 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     };
   }
 
+  // Fase do LP seleccionada pelo user (persiste durante a sessão)
+  let currentLPPhase = 'A';
+
+  // Render do painel "Mix de compras LP vs 2025" — só aparece em Fase B
+  function renderBucketUsageHtml(out) {
+    if (out.phase !== 'B' || !out.bucketUsage) return '';
+    const rows = Object.entries(out.bucketUsage)
+      .filter(([k, u]) => u.m3_consumed_lp > 0.5 || u.ton_actual_2025 > 0.5)
+      .sort((a, b) => b[1].ton_actual_2025 - a[1].ton_actual_2025)
+      .map(([k, u]) => {
+        const tonLp = u.ton_consumed_lp;
+        const dPct = u.delta_pct;
+        const dColor = Math.abs(dPct) < 0.5 ? 'var(--color-text-secondary)'
+          : (dPct < 0 ? 'var(--color-orange)' : 'var(--color-blue)');
+        // Pill: atingiu o limite da banda?
+        let bandTag = '';
+        if (Math.abs(dPct - 15) < 0.5) bandTag = '<span class="pill pill-blue" style="font-size:0.65rem;">topo +15%</span>';
+        else if (Math.abs(dPct + 15) < 0.5) bandTag = '<span class="pill pill-orange" style="font-size:0.65rem;">fundo −15%</span>';
+        const priceTag = u.eur_per_ton_is_fallback
+          ? `<small style="color:var(--color-orange);" title="Preço estimado por fallback (média da mesma gama)">${u.eur_per_ton.toFixed(2)}€*</small>`
+          : `<span>${u.eur_per_ton.toFixed(2)}€</span>`;
+        return `<tr>
+          <td><strong>${u.comp}mm × ${u.gama}</strong></td>
+          <td class="num">${fmtNum(u.ton_actual_2025)}</td>
+          <td class="num" style="color:var(--color-text-tertiary); font-size:0.75rem;">[${fmtNum(u.ton_min_lp)} — ${fmtNum(u.ton_max_lp)}]</td>
+          <td class="num"><strong>${fmtNum(tonLp)}</strong></td>
+          <td class="num" style="color:${dColor}; font-weight:600;">${dPct >= 0 ? '+' : ''}${dPct.toFixed(1)}% ${bandTag}</td>
+          <td class="num">${priceTag}</td>
+          <td class="num">€${fmtNum(u.eur_lp)}</td>
+        </tr>`;
+      }).join('');
+    if (!rows) return '';
+    return `
+      <details style="margin-top:16px;" open>
+        <summary style="cursor:pointer; font-weight:600; font-size:0.9rem; padding:8px 0;">
+          🛒 Mix de compras LP vs 2025 — banda ±${(out.comprasTolPct||15).toFixed(0)}%
+        </summary>
+        <div style="font-size:0.8125rem; color:var(--color-text-secondary); margin-bottom:8px;">
+          Volume consumido pelo LP em cada bucket (comprimento × gama de compras) comparado com o histórico 2025. Δ% positivo (azul) significa que o LP recomenda <strong>comprar mais</strong> dessa gama; negativo (laranja) significa <strong>comprar menos</strong>. Limites: <code>±15%</code> do 2025.
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Bucket</th>
+                <th class="num">2025 (ton)</th>
+                <th class="num">Banda LP (ton)</th>
+                <th class="num">LP (ton)</th>
+                <th class="num">Δ%</th>
+                <th class="num">€/ton</th>
+                <th class="num">€ total LP</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div style="font-size:0.75rem; color:var(--color-text-secondary); margin-top:8px;">
+          * Preço marcado com asterisco = fallback (bucket sem preço directo, média da mesma gama noutros comprimentos).
+        </div>
+      </details>`;
+  }
+
   async function renderLP(pairs) {
     const el = document.getElementById('lpContent');
     const totalEl = document.getElementById('lpTotal');
+    const titleEl = document.getElementById('lpPanelTitle');
+    const subtitleEl = document.getElementById('lpPanelSubtitle');
     if (!el) return;
-    const out = await computeLPGlobal(pairs);
+    const out = await computeLPGlobal(pairs, { phase: currentLPPhase });
     if (!out) { el.innerHTML = '<div class="empty-state" style="padding:24px;"><p>Aguarda dados.</p></div>'; return; }
     if (out.error) {
       el.innerHTML = `<div class="banner banner-error"><strong>Erro LP:</strong> ${out.error}</div>`;
       if (totalEl) totalEl.textContent = 'erro';
       return;
     }
-    const { byTabua, shortfalls, ganhoTon, ganhoEur, nCandidates, nProductsWithDemand, feasible, coverageChain } = out;
+    const { byTabua, shortfalls, ganhoTon, ganhoEur, nCandidates, nProductsWithDemand, feasible, coverageChain, phase, bucketUsage, nBucketsActive, comprasTolPct } = out;
+    if (titleEl) {
+      titleEl.textContent = phase === 'B'
+        ? 'LP Global — Fase B (cost mix + compras ±15%)'
+        : 'LP Global — Fase A (cost mix only)';
+    }
+    if (subtitleEl) {
+      subtitleEl.innerHTML = phase === 'B'
+        ? `Minimiza € rolaria. Variáveis: cost mix por tábua <strong>+</strong> compras m³ por (comprimento × gama) na banda <strong>±${(comprasTolPct||15).toFixed(0)}%</strong>. Triagem ainda fixa.`
+        : `Minimiza ton rolaria · demanda tábuas + co-produtos · sem optimizar compras (Fase B) ou triagem (Fase C).`;
+    }
     if (totalEl) {
       totalEl.innerHTML = feasible
         ? `<strong>Ganho LP: ${fmtNum(ganhoTon)} ton/ano · €${fmtNum(ganhoEur)}/ano</strong>`
@@ -4013,8 +4093,11 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         </table>
       </div>
       ${coverageHtml}
+      ${renderBucketUsageHtml(out)}
       <div class="banner banner-info" style="margin-top:16px; font-size:0.8125rem;">
-        ✓ <strong>LP global coordenado:</strong> demanda como piso (<code>D ≤ supply</code>), over-delivery até <strong>+${(out.tolPct||0).toFixed(1)}%</strong> · densidade rolaria <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>. <strong>Limitações Fase A:</strong> gama Ø é fixa por tábua (dominante actual) — Fase B introduz triagem como variável. Compra ainda assumida constante — Fase C com tolerância ±15%.
+        ${phase === 'B'
+          ? `✓ <strong>Fase B activa:</strong> LP optimiza cost mix <strong>+</strong> compras m³/gama (banda <strong>±${(comprasTolPct||15).toFixed(0)}%</strong>). Triagem ainda fixa (Fase C/D). Demanda como piso · over-delivery até <strong>+${(out.tolPct||0).toFixed(1)}%</strong> · densidade <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>.`
+          : `✓ <strong>Fase A:</strong> cost mix only. Demanda como piso · over-delivery até <strong>+${(out.tolPct||0).toFixed(1)}%</strong> · densidade <strong>${(out.density||0.85).toFixed(2)} ton/m³</strong>. <strong>Próximos passos:</strong> activa <em>Fase B</em> para optimizar mix de compras (±15%); Fase C/D para triagem.`}
       </div>
     `;
 
@@ -4651,6 +4734,30 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
   setTimeout(() => {
     const periodEl = document.getElementById('paresPeriod');
     if (periodEl) periodEl.addEventListener('change', refreshParesReais);
+    // Wire-up do toggle Fase A/B do LP
+    ['lpPhaseA', 'lpPhaseB'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const phase = btn.dataset.phase;
+        if (phase === currentLPPhase) return;
+        currentLPPhase = phase;
+        // Update visual state
+        document.querySelectorAll('.lp-phase-btn').forEach(b => {
+          if (b.dataset.phase === phase) {
+            b.style.background = 'var(--color-blue)';
+            b.style.color = 'white';
+            b.classList.add('lp-phase-active');
+          } else {
+            b.style.background = 'transparent';
+            b.style.color = 'var(--color-text-secondary)';
+            b.classList.remove('lp-phase-active');
+          }
+        });
+        // Re-render LP com nova fase
+        if (lastDetectedPairs) renderLP(lastDetectedPairs);
+      });
+    });
   }, 500);
 
   function onUnauthenticated() {
