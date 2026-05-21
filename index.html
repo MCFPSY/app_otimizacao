@@ -2347,6 +2347,7 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         if (det.kind === 'volumes') {
           const { volumes, paisShare } = det.result;
           const n = await saveComprasVolumes(volumes, paisShare);
+          invalidateComprasMixCache();
           const totalTon = volumes.reduce((s, v) => s + Number(v.ton || 0), 0);
           statusEl.innerHTML = `<span class="pill pill-green">✓</span> Volumes: ${n} buckets · ${fmtNum(totalTon)} ton`;
           summaryHtml = `
@@ -2355,6 +2356,7 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         } else if (det.kind === 'precos') {
           const items = det.result;
           const n = await saveComprasPrecos(items);
+          invalidateComprasMixCache();
           statusEl.innerHTML = `<span class="pill pill-green">✓</span> Preços: ${n} linhas`;
           const years = [...new Set(items.map(i => i.ano))].sort();
           summaryHtml = `
@@ -3520,9 +3522,10 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
   //
   // Slack variables com penalidade alta absorvem demanda não satisfeita
   //
-  async function computeLPGlobal(pairs) {
+  async function computeLPGlobal(pairs, opts) {
     if (!engineSettings || !pairs || pairs.length === 0) return null;
     if (typeof solver === 'undefined') return { error: 'LP solver não carregou (CDN)' };
+    const phase = (opts && opts.phase) || 'A';   // 'A' = cost mix only ; 'B' = + compras ±15%
     const kerf_d = Number(engineSettings.kerf_disco_mm);
     const kerf_f = Number(engineSettings.kerf_fita_mm);
     const cap = Number(engineSettings.cap_costaneiros);
@@ -3531,7 +3534,12 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     const preco = Number(engineSettings.preco_eur_ton);
     const DENSITY = Number(engineSettings.density_rolaria_ton_m3 ?? CANONICAL.density_rolaria_ton_m3);
     const TOL = Math.max(0, Number(engineSettings.demand_tolerance_pct ?? CANONICAL.demand_tolerance_pct)) / 100;
+    const COMPRAS_TOL = 0.15;  // ±15% banda de compras (alavanca 1)
     const demandMap = await loadDemandMap();
+    const comprasMix = (phase === 'B') ? await loadComprasMix() : null;
+    if (phase === 'B' && !comprasMix) {
+      return { error: 'Fase B: dados de compras_mix_2025 não disponíveis. Carrega ambos os ficheiros em Dados.' };
+    }
 
     // Construir candidatos: para cada tábua detectada, todos os costaneiros (dom + alts + classe=C planeamento)
     // que sejam length-matched e geometricamente OK
@@ -3559,9 +3567,14 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         if (cost.W >= tab.W || cost.W > 100) continue;
         const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
         if (r.error || r.avgN_main === 0) continue;
+        // Bucket de compras: (comprimento da tábua) × (gama compras derivada da gama dominante)
+        const compMm = tab.length;
+        const gamaCompras = gamaDominanteToCompras(p.gama_dominante) || '≥15AC';
+        const bucketKey = `${compMm}|${gamaCompras}`;
         candidates.push({
           tabua: p.tabua, cost: costName, aprov: r.aproveitamento,
           coRatio: r.avgCoRatio, K: r.avgK, gama: p.gama_dominante,
+          compMm, gamaCompras, bucketKey,
         });
       }
     }
@@ -3573,14 +3586,30 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     candidates.forEach(c => { productSet.add(c.tabua); productSet.add(c.cost); });
 
     // Construir modelo LP
+    // Fase A: objectivo = m³ rolaria total (key='rolaria')
+    // Fase B: objectivo = € rolaria total (key='cost'); preço por candidato vem do bucket
+    const OBJ = phase === 'B' ? 'cost' : 'rolaria';
     const model = {
-      optimize: 'rolaria', opType: 'min',
+      optimize: OBJ, opType: 'min',
       constraints: {}, variables: {},
     };
 
+    // Pré-computar coeficiente de objectivo por candidato
+    // Fase A: coef = K (m³ rolaria por m³ main produzido)
+    // Fase B: coef = K × eur_per_m3 do bucket = K × eur_per_ton × density
+    function candidateObjCoef(c) {
+      if (phase === 'A') return c.K;
+      const b = comprasMix.get(c.bucketKey);
+      if (!b || b.eur_per_ton == null) {
+        // Fallback: preço canónico
+        return c.K * Number(engineSettings.preco_eur_ton ?? 85) * DENSITY;
+      }
+      return c.K * b.eur_per_ton * DENSITY;
+    }
+
     candidates.forEach((c, i) => {
       const v = `x_${i}`;
-      model.variables[v] = { rolaria: c.K };
+      model.variables[v] = { [OBJ]: candidateObjCoef(c) };
       // Contribui como MAIN para a demanda da tábua
       const tKey = `dem_${c.tabua}`;
       model.variables[v][tKey] = (model.variables[v][tKey] || 0) + 1;
@@ -3588,6 +3617,11 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       if (demandMap.has(c.cost)) {
         const cKey = `dem_${c.cost}`;
         model.variables[v][cKey] = (model.variables[v][cKey] || 0) + c.coRatio;
+      }
+      // Fase B: contribui K × x para o consumo do bucket (m³ rolaria)
+      if (phase === 'B') {
+        const bKey = `buy_${c.bucketKey}`;
+        model.variables[v][bKey] = (model.variables[v][bKey] || 0) + c.K;
       }
     });
 
@@ -3601,6 +3635,8 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     // "roubar produção a high-runners" e não corresponde a otimização real.
     let nProductsWithDemand = 0;
     const demandBands = {};  // {prod: {Dmin, D, Dmax}}
+    // Penalty para slack — em unidades do objectivo (m³ rolaria em Fase A, € em Fase B)
+    const SLACK_PENALTY_DEMAND = phase === 'B' ? 1e7 : 1e6;
     for (const prod of productSet) {
       const key = `dem_${prod}`;
       const someVarHasKey = Object.values(model.variables).some(v => v[key]);
@@ -3608,14 +3644,50 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       const D = Number(demandMap.get(prod) || 0);
       if (D <= 0) continue;
       nProductsWithDemand++;
-      const Dmin = D;                  // PISO: nunca entregar menos
-      const Dmax = D * (1 + TOL);      // TECTO: over-delivery limitada a +TOL%
+      const Dmin = D;
+      const Dmax = D * (1 + TOL);
       demandBands[prod] = { D, Dmin, Dmax };
       model.constraints[key] = { min: Dmin, max: Dmax };
-      // Slack: contribui POSITIVAMENTE para a constraint (compensa shortfall).
-      // Penalty 1e6 garante que LP só o usa em infeasibility real.
       const slackName = `slack_${prod}`;
-      model.variables[slackName] = { rolaria: 1e6, [key]: 1 };
+      model.variables[slackName] = { [OBJ]: SLACK_PENALTY_DEMAND, [key]: 1 };
+    }
+
+    // ===== Fase B: constraints de bucket de compras =====
+    // Para cada bucket (comp × gama) usado por algum candidato:
+    //   ton_min/density ≤ Σ_{i in bucket} K_i × x_i ≤ ton_max/density
+    // Slack com penalty alto (mas inferior ao de demanda) absorve infeasibility.
+    const bucketBands = {};
+    let nBucketsActive = 0;
+    if (phase === 'B') {
+      const SLACK_PENALTY_COMPRAS = 1e4;  // €/m³, alto mas << SLACK_PENALTY_DEMAND
+      // Encontrar buckets usados
+      const bucketsUsed = new Set(candidates.map(c => c.bucketKey));
+      for (const bKey of bucketsUsed) {
+        const b = comprasMix.get(bKey);
+        if (!b) {
+          // Bucket usado por candidato mas sem dados de compras — usar fallback wide bounds
+          console.warn('[LP B] bucket usado sem dados de compras:', bKey);
+          continue;
+        }
+        const minM3 = b.ton_min / DENSITY;
+        const maxM3 = b.ton_max / DENSITY;
+        bucketBands[bKey] = {
+          comp: b.comp, gama: b.gama,
+          ton_2025: b.ton, ton_min: b.ton_min, ton_max: b.ton_max,
+          m3_min: minM3, m3_max: maxM3,
+          eur_per_ton: b.eur_per_ton,
+          eur_per_ton_is_fallback: !!b.eur_per_ton_is_fallback,
+        };
+        nBucketsActive++;
+        const constraintKey = `buy_${bKey}`;
+        model.constraints[constraintKey] = { min: minM3, max: maxM3 };
+        // Slack para subir acima do max (precisas de mais rolaria que +15%)
+        const slackOver = `slack_buy_over_${bKey}`;
+        model.variables[slackOver] = { [OBJ]: SLACK_PENALTY_COMPRAS, [constraintKey]: -1 };
+        // Slack para descer abaixo do min (não precisas de tanta rolaria)
+        const slackUnder = `slack_buy_under_${bKey}`;
+        model.variables[slackUnder] = { [OBJ]: SLACK_PENALTY_COMPRAS, [constraintKey]: 1 };
+      }
     }
 
     // Resolver
@@ -3654,6 +3726,38 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     }
     // Total rolaria optimal
     const totalRolariaLP = allocations.reduce((s, a) => s + a.K * a.volume, 0);
+
+    // ===== Fase B: uso por bucket de compras + custo total em € =====
+    const bucketUsage = {};
+    if (phase === 'B') {
+      // Inicializar com todos os buckets de bucketBands
+      for (const [bKey, band] of Object.entries(bucketBands)) {
+        bucketUsage[bKey] = {
+          comp: band.comp, gama: band.gama,
+          m3_consumed_lp: 0,
+          ton_consumed_lp: 0,
+          ton_actual_2025: band.ton_2025,
+          ton_min_lp: band.ton_min,
+          ton_max_lp: band.ton_max,
+          eur_per_ton: band.eur_per_ton,
+          eur_per_ton_is_fallback: band.eur_per_ton_is_fallback,
+          delta_ton: 0,
+          delta_pct: 0,
+        };
+      }
+      // Acumular consumo
+      allocations.forEach(a => {
+        const u = bucketUsage[a.bucketKey];
+        if (!u) return;
+        u.m3_consumed_lp += a.K * a.volume;
+      });
+      for (const u of Object.values(bucketUsage)) {
+        u.ton_consumed_lp = u.m3_consumed_lp * DENSITY;
+        u.delta_ton = u.ton_consumed_lp - u.ton_actual_2025;
+        u.delta_pct = u.ton_actual_2025 > 0 ? (u.delta_ton / u.ton_actual_2025 * 100) : 0;
+        u.eur_lp = u.ton_consumed_lp * u.eur_per_ton;
+      }
+    }
 
     // ==== COVERAGE CHAIN: para cada produto com demanda, decompor a oferta LP ====
     // mainSupply[prod] = m³ produzidos como MAIN (Σ x_{prod, *})
@@ -3721,6 +3825,7 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
 
     // AS-IS rolaria para comparar: usa o dominant_costaneiro de cada pair
     let totalRolariaAS = 0;
+    let totalCostAS = 0;       // € (Fase B usa preços por bucket; Fase A usa preço único)
     let totalTabuaAS = 0;
     for (const p of pairs) {
       const tab = parseRefDim(p.tabua);
@@ -3729,20 +3834,43 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
       if (r.error || !r.avgAreaMain) continue;
       const demand = Number(demandMap.get(p.tabua) || 0);
-      totalRolariaAS += r.avgK * demand;
+      const m3 = r.avgK * demand;
+      totalRolariaAS += m3;
       totalTabuaAS += demand;
+      // Custo AS-IS em €
+      if (phase === 'B') {
+        const gamaC = gamaDominanteToCompras(p.gama_dominante) || '≥15AC';
+        const bKey = `${tab.length}|${gamaC}`;
+        const b = comprasMix.get(bKey);
+        const eurPerTon = (b && b.eur_per_ton != null) ? b.eur_per_ton : preco;
+        totalCostAS += m3 * DENSITY * eurPerTon;
+      } else {
+        totalCostAS += m3 * DENSITY * preco;
+      }
+    }
+    // Custo LP total em €
+    let totalCostLP = 0;
+    if (phase === 'B') {
+      totalCostLP = Object.values(bucketUsage).reduce((s, u) => s + u.eur_lp, 0);
+    } else {
+      totalCostLP = totalRolariaLP * DENSITY * preco;
     }
     const ganhoVolumeRolaria = totalRolariaAS - totalRolariaLP;
-    // Conversão m³ rolaria → ton: density configurável (canónico 0.85 pinho fresco)
     const ganhoTon = ganhoVolumeRolaria * DENSITY;
-    const ganhoEur = ganhoTon * preco;
+    // Em Fase A, ganhoEur usa preço único; em Fase B, é diff de custos reais
+    const ganhoEur = phase === 'B' ? (totalCostAS - totalCostLP) : (ganhoTon * preco);
 
     return {
+      phase,
       candidates, allocations, byTabua, shortfalls, coverageChain, demandBands,
-      totalRolariaAS, totalRolariaLP, ganhoVolumeRolaria, ganhoTon, ganhoEur,
+      bucketBands, bucketUsage,
+      totalRolariaAS, totalRolariaLP, totalCostAS, totalCostLP,
+      ganhoVolumeRolaria, ganhoTon, ganhoEur,
       nProductsWithDemand, nCandidates: candidates.length,
+      nBucketsActive,
       feasible: result.feasible !== false,
       tolPct: TOL * 100, density: DENSITY,
+      comprasTolPct: COMPRAS_TOL * 100,
     };
   }
 
@@ -4216,6 +4344,67 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
     for (const r of data) m.set(r.produto, Number(r.m3_ano));
     cachedDemandMap = m;
     return m;
+  }
+
+  // ===== Fase B: Compras mix (volumes anuais + preço médio por bucket) =====
+  // Bucket key: `${comprimento}|${gama_compras}` (e.g. "2500|≥15AC")
+  let cachedComprasMix = null;
+  async function loadComprasMix() {
+    if (cachedComprasMix) return cachedComprasMix;
+    const { data, error } = await sb.from('compras_mix_2025').select('*');
+    if (error) { console.error('loadComprasMix:', error); return null; }
+    if (!data || data.length === 0) return null;
+    const m = new Map();
+    for (const r of data) {
+      const key = `${r.comprimento_mm}|${r.gama_compras}`;
+      m.set(key, {
+        comp: Number(r.comprimento_mm),
+        gama: r.gama_compras,
+        ton: Number(r.ton_total),
+        eur_per_ton: r.eur_per_ton_avg != null ? Number(r.eur_per_ton_avg) : null,
+        ton_min: Number(r.ton_min_lp),
+        ton_max: Number(r.ton_max_lp),
+        share_pt: r.share_pt != null ? Number(r.share_pt) : null,
+        share_es: r.share_es != null ? Number(r.share_es) : null,
+      });
+    }
+    // Fallback para preços null: média da mesma gama noutros comprimentos
+    for (const v of m.values()) {
+      if (v.eur_per_ton == null) {
+        const peers = [...m.values()].filter(x => x.gama === v.gama && x.eur_per_ton != null);
+        if (peers.length > 0) {
+          v.eur_per_ton = peers.reduce((s, x) => s + x.eur_per_ton, 0) / peers.length;
+          v.eur_per_ton_is_fallback = true;
+        } else {
+          v.eur_per_ton = Number(engineSettings?.preco_eur_ton ?? 85);
+          v.eur_per_ton_is_fallback = true;
+        }
+      }
+    }
+    cachedComprasMix = m;
+    return m;
+  }
+  function invalidateComprasMixCache() { cachedComprasMix = null; }
+
+  // Mapear gama_dominante (texto da produção/triagem) → gama_compras canónica
+  // exemplos: "2500 mm - 181-210mm" → ≥15AC ; "2500 mm - >250mm" → ≥25AC
+  function gamaDominanteToCompras(gamaDom) {
+    if (!gamaDom) return null;
+    const s = String(gamaDom).toUpperCase();
+    if (/CANTER/.test(s)) return 'CANTER';
+    let maxD = null;
+    let m = s.match(/(\d{2,3})\s*-\s*(\d{2,3})\s*MM/);
+    if (m) maxD = Number(m[2]);
+    if (maxD == null) {
+      m = s.match(/<\s*(\d{2,3})\s*MM/);
+      if (m) maxD = Number(m[1]);
+    }
+    if (maxD == null) {
+      m = s.match(/>\s*(\d{2,3})\s*MM/);
+      if (m) maxD = Number(m[1]) + 30;
+    }
+    if (maxD == null) return '≥15AC';
+    return maxD > 250 ? '≥25AC' : '≥15AC';
   }
 
   // Co-produção: dado N costaneiros por tronco, areaCost e areaMain, quantos m³ de costaneiro
