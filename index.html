@@ -529,7 +529,7 @@
   /* ===== Login modal (Marco 2) ===== */
   .auth-overlay {
     position: fixed; inset: 0;
-    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    background: var(--color-white);
     z-index: 1000;
     display: flex; align-items: center; justify-content: center;
     padding: 24px;
@@ -540,7 +540,8 @@
     padding: 40px;
     width: 100%;
     max-width: 420px;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--color-border-soft);
   }
   .auth-card h1 {
     font-size: 1.5rem;
