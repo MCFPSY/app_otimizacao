@@ -4070,9 +4070,19 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       }
     }
 
+    // Warning visível quando Fase B activa — comunicar a assumpção sobre distribuição Ø
+    const faseBWarning = phase === 'B' ? `
+      <div class="banner banner-warn" style="margin-bottom:12px; font-size:0.85rem;">
+        ⚠️ <strong>Atenção — assumpção da Fase B:</strong> o LP assume que comprar +X% de uma gama de compra (ex.: ≥15AC, Canter, ≥25AC) traduz-se proporcionalmente em mais oferta de <strong>todas as sub-gamas de Ø</strong> dentro dela. <strong>Na prática não controlas o mix interno</strong> (ex.: dentro de ≥15AC não escolhes quanto vem em 150-180 vs 211-250 — depende do fornecedor e raio-X). O ganho real estará algures entre <em>Fase A</em> e este número.
+        <br><br>
+        <span style="color:var(--color-text-secondary);">Esta incerteza será resolvida em <strong>Fase C/D</strong> com ingestão do raio-X de triagem. Activa <em>Fase A</em> no toggle se preferires excluir esta incerteza.</span>
+      </div>
+    ` : '';
+
     el.innerHTML = `
+      ${faseBWarning}
       <div style="margin-bottom:12px; font-size:0.875rem;">
-        Modelo LP: <strong>${nCandidates}</strong> variáveis (pares t×c viáveis) · <strong>${nProductsWithDemand}</strong> constraints de demanda
+        Modelo LP: <strong>${nCandidates}</strong> variáveis (pares t×c viáveis) · <strong>${nProductsWithDemand}</strong> constraints de demanda${phase === 'B' ? ` · <strong>${nBucketsActive || 0}</strong> buckets de compra com banda` : ''}
         <br>
         ${shortfallHtml}
         <br>
