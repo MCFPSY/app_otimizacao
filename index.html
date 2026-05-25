@@ -3605,6 +3605,17 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
       (planC || []).forEach(r => allCosts.add(r.produto));
     } catch (_) {}
     console.log('[LP] candidatos costaneiros considerados:', allCosts.size);
+    // Mapeamento tábua-length → rolaria-comprimento (1 rolaria produz N tábuas)
+    //   1200mm tábua  → 2500mm rolaria (2 tábuas por tronco)
+    //   1000mm tábua  → 2100mm rolaria (2 tábuas por tronco)
+    //    800mm tábua  → 2600mm rolaria (3 tábuas por tronco)
+    //  outros (retestagem, comprimentos da rolaria nativos) → assume length === length
+    function tabuaLengthToRolariaComp(L) {
+      if (L === 1200) return 2500;
+      if (L === 1000) return 2100;
+      if (L === 800)  return 2600;
+      return L;  // fallback (e.g. tábua de 2500mm em L02.2 = mesma rolaria)
+    }
     for (const p of pairs) {
       const tab = parseRefDim(p.tabua);
       if (!tab || !tab.length) continue;
@@ -3618,8 +3629,8 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         if (cost.W >= tab.W || cost.W > 100) continue;
         const r = calcAprovMedioGama(p.gama_dominante, tab.W, tab.H, cost.W, cost.H, kerf_d, kerf_f, cap, piVal);
         if (r.error || r.avgN_main === 0) continue;
-        // Bucket de compras: (comprimento da tábua) × (gama compras derivada da gama dominante)
-        const compMm = tab.length;
+        // Bucket de compras: (comprimento da ROLARIA, não da tábua) × (gama compras)
+        const compMm = tabuaLengthToRolariaComp(tab.length);
         const gamaCompras = gamaDominanteToCompras(p.gama_dominante) || '≥15AC';
         const bucketKey = `${compMm}|${gamaCompras}`;
         candidates.push({
