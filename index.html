@@ -2,9 +2,28 @@
 <html lang="pt-PT">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>MCF Otimização</title>
-<meta name="theme-color" content="#007AFF">
+<meta name="description" content="Otimização de aproveitamento de madeira na MCF — combinações de corte, triagem e compras.">
+<meta name="theme-color" content="#1D1D1F">
+
+<!-- Favicons -->
+<link rel="icon" type="image/x-icon" href="icons/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
+
+<!-- PWA / Apple Touch -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167.png">
+<link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152.png">
+<link rel="apple-touch-icon" sizes="120x120" href="icons/apple-touch-icon-120.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="MCF Otim">
+<meta name="mobile-web-app-capable" content="yes">
+
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://unpkg.com/javascript-lp-solver@0.4.24/prod/solver.js"></script>
@@ -63,11 +82,17 @@
     font-size: 1.25rem; font-weight: 600;
   }
   .app-title .logo {
-    width: 32px; height: 32px;
-    background: var(--color-blue);
-    border-radius: 8px;
+    width: 36px; height: 36px;
+    background: transparent;
+    border-radius: 0;
     display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: 700; font-size: 0.85rem;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .app-title .logo img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
   }
   .header-meta {
     display: flex; align-items: center; gap: 16px;
@@ -524,11 +549,17 @@
     display: flex; align-items: center; gap: 12px;
   }
   .auth-card h1 .logo {
-    width: 36px; height: 36px;
-    background: var(--color-blue);
-    border-radius: 8px;
+    width: 48px; height: 48px;
+    background: transparent;
+    border-radius: 0;
     display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: 700; font-size: 0.85rem;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .auth-card h1 .logo img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
   }
   .auth-card .subtitle {
     color: var(--color-text-secondary);
@@ -663,7 +694,7 @@
 <!-- ============== LOGIN MODAL (Marco 2) ============== -->
 <div class="auth-overlay" id="authOverlay">
   <div class="auth-card">
-    <h1><div class="logo">MCF</div> <span>Otimização</span></h1>
+    <h1><div class="logo"><img src="icons/logo-96.png" alt="MCF" width="48" height="48"></div> <span>Otimização</span></h1>
     <div class="subtitle" id="authSubtitle">Entra para aceder à app — auth interna MCF.</div>
 
     <form class="auth-form" id="authForm" autocomplete="on">
@@ -689,7 +720,7 @@
 <header class="app-header">
   <div class="header-content">
     <div class="app-title">
-      <div class="logo">MCF</div>
+      <div class="logo"><img src="icons/logo-64.png" alt="MCF" width="36" height="36"></div>
       <span>Otimização de Aproveitamento</span>
     </div>
     <div class="header-meta">
