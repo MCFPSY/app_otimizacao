@@ -1301,6 +1301,25 @@
     <h2 class="section-title">Combinações</h2>
     <p class="section-subtitle">Output #1 do modelo: para cada referência produzida, o corte concreto recomendado.</p>
 
+    <!-- TOGGLE GLOBAL — afecta Top 3, Vista LP completa e Mix compras -->
+    <div class="panel" id="lpPhaseTogglePanel" style="border-left:4px solid var(--color-orange); padding:16px 20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:280px;">
+          <div style="font-weight:600; font-size:1rem; margin-bottom:4px;">⚙️ Modo de optimização</div>
+          <div style="font-size:0.85rem; color:var(--color-text-secondary);" id="lpPhaseToggleSubtitle">
+            <strong>Fase A:</strong> só optimiza mix de combinações (cost por par). Compras e triagem fixas. <strong>Números 100% defensáveis.</strong>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:0.8rem; color:var(--color-text-secondary); font-weight:500;">Optimizar compras (±15%)</span>
+          <div style="display:flex; gap:0; border:1px solid var(--color-border); border-radius:10px; overflow:hidden; font-size:0.9rem; font-weight:600;">
+            <button id="lpPhaseA" class="lp-phase-btn lp-phase-active" data-phase="A" style="padding:10px 18px; border:none; background:var(--color-blue); color:white; cursor:pointer;">OFF · Fase A</button>
+            <button id="lpPhaseB" class="lp-phase-btn" data-phase="B" style="padding:10px 18px; border:none; background:transparent; color:var(--color-text-secondary); cursor:pointer; border-left:1px solid var(--color-border);">ON · Fase B</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TOP 3 RECOMENDAÇÕES VALIDÁVEIS — narrativa AS-IS → TO-BE -->
     <div class="panel" id="top3Panel" style="border-left:4px solid var(--color-blue); background: linear-gradient(135deg, rgba(0,122,255,0.06), transparent);">
       <div class="panel-header">
@@ -1322,13 +1341,7 @@
             <div class="panel-title" id="lpPanelTitle">LP Global — Fase A (cost mix)</div>
             <div class="panel-subtitle" id="lpPanelSubtitle">Minimiza ton rolaria · demanda tábuas + co-produtos · sem optimizar compras ou triagem.</div>
           </div>
-          <div style="display:flex; align-items:center; gap:12px;">
-            <div style="display:flex; gap:0; border:1px solid var(--color-border); border-radius:8px; overflow:hidden; font-size:0.85rem; font-weight:600;">
-              <button id="lpPhaseA" class="lp-phase-btn lp-phase-active" data-phase="A" style="padding:6px 14px; border:none; background:var(--color-blue); color:white; cursor:pointer;">Fase A</button>
-              <button id="lpPhaseB" class="lp-phase-btn" data-phase="B" style="padding:6px 14px; border:none; background:transparent; color:var(--color-text-secondary); cursor:pointer; border-left:1px solid var(--color-border);">Fase B</button>
-            </div>
-            <span class="pill pill-green" id="lpTotal">A calcular...</span>
-          </div>
+          <span class="pill pill-green" id="lpTotal">A calcular...</span>
         </div>
         <div id="lpContent" style="margin-top:8px;">A construir modelo LP...</div>
       </div>
@@ -4775,7 +4788,7 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
   setTimeout(() => {
     const periodEl = document.getElementById('paresPeriod');
     if (periodEl) periodEl.addEventListener('change', refreshParesReais);
-    // Wire-up do toggle Fase A/B do LP
+    // Wire-up do toggle Fase A/B do LP (afecta Top 3, Vista LP completa e Mix compras)
     ['lpPhaseA', 'lpPhaseB'].forEach(id => {
       const btn = document.getElementById(id);
       if (!btn) return;
@@ -4783,7 +4796,7 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
         const phase = btn.dataset.phase;
         if (phase === currentLPPhase) return;
         currentLPPhase = phase;
-        // Update visual state
+        // Update visual state of both buttons
         document.querySelectorAll('.lp-phase-btn').forEach(b => {
           if (b.dataset.phase === phase) {
             b.style.background = 'var(--color-blue)';
@@ -4795,6 +4808,16 @@ TO-BE (4 gamas):  &lt;185  |  186-218  |  219-252  |  &gt;252   ✓ mesma topolo
             b.classList.remove('lp-phase-active');
           }
         });
+        // Update toggle subtitle + border color
+        const togglePanel = document.getElementById('lpPhaseTogglePanel');
+        const toggleSubtitle = document.getElementById('lpPhaseToggleSubtitle');
+        if (phase === 'B') {
+          if (togglePanel) togglePanel.style.borderLeftColor = 'var(--color-orange)';
+          if (toggleSubtitle) toggleSubtitle.innerHTML = '<strong>Fase B activa:</strong> LP também optimiza mix de compras (banda ±15%). <strong style="color:var(--color-orange);">⚠ Atenção:</strong> assume distribuição uniforme de Ø dentro de cada gama — ganho real entre Fase A e este número (resolvido em Fase C/D).';
+        } else {
+          if (togglePanel) togglePanel.style.borderLeftColor = 'var(--color-blue)';
+          if (toggleSubtitle) toggleSubtitle.innerHTML = '<strong>Fase A:</strong> só optimiza mix de combinações (cost por par). Compras e triagem fixas. <strong>Números 100% defensáveis.</strong>';
+        }
         // Re-render LP com nova fase
         if (lastDetectedPairs) renderLP(lastDetectedPairs);
       });
